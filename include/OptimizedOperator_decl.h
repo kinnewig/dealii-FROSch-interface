@@ -8,9 +8,25 @@ namespace FROSch {
     using namespace std;
     using namespace Teuchos;
     using namespace Xpetra;
-
-
-
+    /**
+     * @class OptimizedSchwarzOperator
+     *
+     * The OptimizedSchwarzOperator is derived from the OverlappingOperator. 
+     * It is used to build a (geometric) optimized Schwarz preconditioner.  
+     * As the optimized interface conditions often have the form of Robin 
+     * Boundary conditions, we need a geometric approach in order to apply these 
+     * interface conditions correctly. 
+     *
+     * This backbone class is designed to be used in the OneLevel Preconditioner 
+     * or TwoLevel Preconditioner class. It handles the creation of overlapping 
+     * subproblems (based on some global problem description) and provides tools 
+     * to create local subproblems in other finite element software (e.g., deal.II). 
+     *
+     * @tparam SC The scalar type. (default is double)
+     * @tparam LO The local ordinal type. (default is int)
+     * @tparam GO The global ordinal type. (default is DefaultGlobalOrdinal)
+     * @tparam NO The node type. (default is Tpetra::KokkosClassic::DefaultNode::DefaultNodeType)
+     */
     template <class SC = double,
               class LO = int,
               class GO = DefaultGlobalOrdinal,
@@ -44,7 +60,13 @@ namespace FROSch {
     public:
 
         /**
-         * Default constructor
+         * @brief Constructor for the OptimizedSchwarzOperator class.
+         *
+         * This is the default constructor that takes the (global) system_matrix 
+         * to construct the OptimizedSchwarzOperator.
+         *
+         * @param k The (global) system_matrix.
+         * @param parameterList The list of parameters for the OptimizedSchwarzOperator.
          */
         OptimizedSchwarzOperator(ConstXMatrixPtr  k,
                                  ParameterListPtr parameterList);
@@ -55,21 +77,72 @@ namespace FROSch {
         virtual int 
         initialize() override;
 
+        /**
+         * @brief Initializes the OptimizedSchwarzOperator based on the given overlap and the dual graph.
+         *
+         * This function creates the overlapping map for the cells (via calling OverlappingOperator::buildOverlappingMap()).
+         * The map is computed based on the given overlap and the dual graph.
+         *
+         * @param overlap The overlap for the Schwarz preconditioner.
+         * @param dualGraph The dual graph of the grid.
+         * @return Error code. 0 if successful.
+         */
         int 
         initialize(int      overlap,
                    GraphPtr dualGraph);
 
+        /**
+         * @brief Assigns the overlapping DoF map to the internal overlapping map.
+         *
+         * This function assigns takes the overlapping DoF map and assigns it
+         * to the internal stores it in OverlappingMap_. 
+         *
+         * This function is forked out from initialize, as the overlapping cell 
+         * map is necessary to compute the overlapping dof map  (the overlapping 
+         * DoF map is computed in FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation). 
+         *
+         * After assigning the overlapping dof map to this->OverlappingMap_, the other functions, 
+         * that are normally called in initialize are called (i.e. OverlappingOperator::initializeOverlappingOperator() 
+         * and OverlappingOperator::updateLocalOverlappingMatrices_Symbolic).
+         *
+         * @param overlappingMap The overlapping dof map.
+         * @return Error code. 0 if successful.
+         */
         int 
         continue_initialize(XMapPtr overlappingMap);
 
+        /**
+         * Not implemented. 
+         */
         int 
         compute() override;
 
+        /**
+         * @brief Compute the preconditioner.
+         *
+         * This function actually computes the preconditioner. Therefore, it computes the 
+         * inverse of the subproblem matrix, which is constructed based on the NeumannMatrix 
+         * (the local system_matrix) and the RobinMatrix (which describes the local optimized interface conditions).
+         *
+         * @warning This function is computationally expensive, as it computes the inverse of all matrices on the subproblems.
+         *
+         * @param neumannMatrix The local system matrix.
+         * @param robinMatrix The matrix containing the optimized interface conditions.
+         * @return Error code. 0 if successful.
+         */
         int 
         compute(ConstXMatrixPtr neumannMatrix, ConstXMatrixPtr robinMatrix);
 
         /**
          * TODO: Temporary work arround, remove later!
+         *
+         * @brief Applies the operator to a MultiVector.
+         *
+         * @param x The input MultiVector.
+         * @param y The output MultiVector.
+         * @param mode The transpose mode. Default is NO_TRANS.
+         * @param alpha The scaling factor for the input. Default is 1.
+         * @param beta The scaling factor for the output. Default is 0.
          */
        	virtual void apply(const XMultiVector &x,
                            XMultiVector &y,
@@ -80,6 +153,35 @@ namespace FROSch {
         	OverlappingOperator<SC,LO,GO,NO>::apply(x,y,true,mode,alpha,beta);
         };
 
+        /**
+         * @brief Redistributes the nodes_vector, cell_vector and auxillary_vector onto the overlapping domain.
+         *
+         * This function takes an Xpetra::MultiVector, that stores a list of nodes
+         * (where each node is given by its coordinates), a Xpetra::MultiVector 
+         * that contains a list of cells (where each cell is described by its vertices)
+         * and an Xpetra::MultiVector auxillary list that contains any further important 
+         * infromation.
+         *
+         * Those vectors redistributes onto the overlapping domain. 
+         * Thhose vectors are redistributed based on the overlapping cell map computed 
+         * in intialize(). But we have to take special care of the node list, as we
+         * can not directly use the overlapping cell map but have to compute a new map
+         * based on the overlapping cell map and the content of the cell_vector.
+         *
+         * 
+         * Moreover, we have to take special care of the cell_vector. As explained above, 
+         * each cell is described by its vertices. The vertices are supplied as the number 
+         * of the vertex. Therefore, this function also takes care to update those vertex 
+         * numbers inside the cell_vector to match the the newly created nodes_vector.
+         *
+         * @param nodeList The nodes_vector (dim, <number vertices>).
+         * @param elementList The cell_vector (<vertices_per_cell>, <number cells>).
+         * @param auxillaryList The auxillary_vector (<arbitrary>, <number cells>).
+         * @param nodeListOverlapping The redistributed nodes_vector.
+         * @param elementListOverlapping The redistributed cell_vector.
+         * @param auxillaryListOverlapping The redistributed auxillary_vector.
+         * @return Error code. 0 if successful.
+         */
         int 
         communicateOverlappingTriangulation(
             XMultiVectorPtr                     nodeList,
@@ -89,49 +191,96 @@ namespace FROSch {
             XMultiVectorTemplatePtr<long long> &elementListOverlapping,
             XMultiVectorTemplatePtr<long long> &auxillaryListOverlapping);
 
+        /**
+         * @brief Prints the description of the OptimizedSchwarzOperator to a stream.
+         *
+         * This function prints a detailed description of the OptimizedSchwarzOperator 
+         * to the provided output stream. The level of detail of the description is 
+         * controlled by the verbLevel parameter.
+         *
+         * @param out The output stream to which the description is printed.
+         * @param verbLevel The verbosity level controlling the detail of the description.
+         */
         void 
         describe(FancyOStream          &out,
                  const EVerbosityLevel  verbLevel) const override;
 
+        /**
+         * @brief This function returns a string with the name of the operator.
+         * 
+         * @return The name of the operator.
+         */
         string 
         description() const override;
 
     protected:
-        
-        int
-        buildOverlappingMap(
-            int      overlap,
-            GraphPtr dualGraph);
-
-        int 
-        updateLocalOverlappingMatrices() override;
-
-        int 
-        updateLocalOverlappingMatrices_Symbolic();
-
-        void 
-        extractLocalSubdomainMatrix_Symbolic();
-
-        /**
-         *  Store a RCP<Xpetra::CrsGraph<SC,LO,GO,NO>>
-         *  which contains the dual graph, i.e.
-         *  if there is an entry in (row i, column j)
-         *  element i and element j are neighbors.
-         */
-        GraphPtr DualGraph_;
-
-        /*
-         * The DualGraph with overlap
-         */
-        ConstXCrsGraphPtr OverlappingGraph_;
-
-        /**
-         * The column map of the DualGraph with overlap
-         */
-        ConstXMapPtr OverlappingElementMap_;
-
-        ConstXMatrixPtr NeumannMatrix_;
-        ConstXMatrixPtr RobinMatrix_;
+      /**
+       * @brief Computes the subdomains matrices based on the system_matrix and the overlapping dof map.
+       *
+       * @param overlap The overlap for the Schwarz preconditioner. Must be >= 1.
+       * @param dualGraph The dual graph of the triangulation.
+       * @return Error code. 0 if successful.
+       */
+      int 
+      buildOverlappingMap(int overlap, GraphPtr dualGraph);
+    
+      /**
+       * @brief Extracts the local subdomain matrices from the system_matrix when it was not done earlier.
+       *
+       * This function is called by buildOverlappingMap. It also adds the local 
+       * robin matrix, that stores the optimized interface conditions onto the 
+       * subdomain matrix.
+       *
+       * @return Error code. 0 if successful.
+       */
+      int 
+      updateLocalOverlappingMatrices() override;
+    
+      /**
+       * @brief An internal function called by updateLocalOverlappingMatrices.
+       *
+       * @return Error code. 0 if successful.
+       */
+      int 
+      updateLocalOverlappingMatrices_Symbolic();
+    
+      /**
+       * @brief An internal function called by updateLocalOverlappingMatrices_Symbolic.
+       */
+      void 
+      extractLocalSubdomainMatrix_Symbolic();
+    
+      /**
+       * @brief A RCP<Xpetra::CrsGraph<SC,LO,GO,NO>> which contains the dual graph.
+       *
+       * If there is an entry in (row i, column j), element i and element j are neighbors.
+       */
+      GraphPtr 
+      DualGraph_;
+    
+      /**
+       * @brief The DualGraph but with overlap.
+       */
+      ConstXCrsGraphPtr 
+      OverlappingGraph_;
+    
+      /**
+       * @brief The column map of the DualGraph with overlap.
+       */
+      ConstXMapPtr 
+      OverlappingElementMap_;
+    
+      /**
+       * @brief Local matrix that contains the local system matrix.
+       */
+      ConstXMatrixPtr 
+      NeumannMatrix_;
+    
+      /**
+       * @brief Local matrix that contains the optimized interface conditions.
+       */
+      ConstXMatrixPtr 
+      RobinMatrix_;
 
     };
 

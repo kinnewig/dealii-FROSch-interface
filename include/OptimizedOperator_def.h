@@ -433,7 +433,7 @@ namespace FROSch {
                 extractLocalSubdomainMatrix_SymbolicTime,
                 "OptimizedSchwarzOperator::extractLocalSubdomainMatrix_Symbolic");
 
-            // buid sudomain matrix
+            // build sudomain matrix
             this->subdomainMatrix_ = 
               MatrixFactory<SC,LO,GO,NO>::Build(this->OverlappingMap_, this->OverlappingMatrix_->getGlobalMaxNumRowEntries());
 
