@@ -196,10 +196,8 @@ FROSchOperator<dim, Number, MemorySpace>::export_crs(
   // Create the CrsGraph
   Teuchos::RCP<XMapType> locally_owned_set_map =
     Teuchos::rcp(new XTpetraMapType(locally_owned_set.make_tpetra_map_rcp()));
-  graph = Xpetra::CrsGraphFactory<int,
-                                  dealii::types::signed_global_dof_index,
-                                  NodeType>::Build(locally_owned_set_map,
-                                                   max_neighbors);
+  graph = Xpetra::CrsGraphFactory<int, size_type, NodeType>::Build(
+    locally_owned_set_map, max_neighbors);
 
   for (auto &cell : triangulation.cell_iterators())
     {
@@ -333,12 +331,12 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   FROSch::sortunique(vertex_array);
 
   Teuchos::RCP<XMapType> x_local_to_global_map =
-    Xpetra::MapFactory<int, dealii::types::signed_global_dof_index, NodeType>::
-      Build(Xpetra::UseTpetra,
-            (size_type)triangulation.n_vertices(),
-            vertex_array(),
-            0,
-            graph->getMap()->getComm());
+    Xpetra::MapFactory<int, size_type, NodeType>::Build(
+      Xpetra::UseTpetra,
+      (size_type)triangulation.n_vertices(),
+      vertex_array(),
+      0,
+      graph->getMap()->getComm());
 
   Teuchos::RCP<const XMapType> x_map = graph->getMap();
 

@@ -22,7 +22,7 @@ class FROSchOperator
 {
 public:
   // --- Declaration ---
-  using size_type = long long;
+  using size_type = dealii::types::signed_global_dof_index;
 
   // Get the NodeType based on the dealii::MemorySpace
   using NodeType = Tpetra::KokkosCompat::KokkosDeviceWrapperNode<
@@ -32,60 +32,35 @@ public:
   // (templated) Tpetra Vector:
   template <typename NumberType>
   using MultiVectorType =
-    Tpetra::MultiVector<NumberType,
-                        int,
-                        dealii::types::signed_global_dof_index,
-                        NodeType>;
+    Tpetra::MultiVector<NumberType, int, size_type, NodeType>;
 
   // (templated) Xpetra Vector:
   template <typename NumberType>
   using XMultiVectorType =
-    Xpetra::MultiVector<NumberType,
-                        int,
-                        dealii::types::signed_global_dof_index,
-                        NodeType>;
+    Xpetra::MultiVector<NumberType, int, size_type, NodeType>;
   template <typename NumberType>
   using XTpetraMultiVectorType =
-    Xpetra::TpetraMultiVector<NumberType,
-                              int,
-                              dealii::types::signed_global_dof_index,
-                              NodeType>;
+    Xpetra::TpetraMultiVector<NumberType, int, size_type, NodeType>;
   template <typename NumberType>
   using XMultiVectorFactory =
-    Xpetra::MultiVectorFactory<NumberType,
-                               int,
-                               dealii::types::signed_global_dof_index,
-                               NodeType>;
+    Xpetra::MultiVectorFactory<NumberType, int, size_type, NodeType>;
 
   // Xpetra to Tpetra
-  using XTpetraMapType =
-    Xpetra::TpetraMap<int, dealii::types::signed_global_dof_index>;
-  using XTpetraGraphType =
-    Xpetra::TpetraCrsGraph<int, dealii::types::signed_global_dof_index>;
-  using XTpetraCrsMatrixType = Xpetra::
-    TpetraCrsMatrix<double, int, dealii::types::signed_global_dof_index>;
+  using XTpetraMapType       = Xpetra::TpetraMap<int, size_type>;
+  using XTpetraGraphType     = Xpetra::TpetraCrsGraph<int, size_type>;
+  using XTpetraCrsMatrixType = Xpetra::TpetraCrsMatrix<double, int, size_type>;
 
   // Xpetra Map, Graph and Matrix
-  using XMapType =
-    Xpetra::Map<int, dealii::types::signed_global_dof_index, NodeType>;
-  using XGraphType =
-    Xpetra::CrsGraph<int, dealii::types::signed_global_dof_index, NodeType>;
-  using XMatrixType = Xpetra::
-    Matrix<Number, int, dealii::types::signed_global_dof_index, NodeType>;
+  using XMapType    = Xpetra::Map<int, size_type, NodeType>;
+  using XGraphType  = Xpetra::CrsGraph<int, size_type, NodeType>;
+  using XMatrixType = Xpetra::Matrix<Number, int, size_type, NodeType>;
   using XCrsMatrixWrapType =
-    Xpetra::CrsMatrixWrap<Number,
-                          int,
-                          dealii::types::signed_global_dof_index,
-                          NodeType>;
-  using XCrsMatrixType = Xpetra::
-    CrsMatrix<Number, int, dealii::types::signed_global_dof_index, NodeType>;
+    Xpetra::CrsMatrixWrap<Number, int, size_type, NodeType>;
+  using XCrsMatrixType = Xpetra::CrsMatrix<Number, int, size_type, NodeType>;
 
   // Optimized Schwarz
   using OptimizedSchwarzType =
-    FROSch::OptimizedSchwarzOperator<double,
-                                     int,
-                                     dealii::types::signed_global_dof_index,
-                                     NodeType>;
+    FROSch::OptimizedSchwarzOperator<double, int, size_type, NodeType>;
 
   // --- Constructor ---
   FROSchOperator(unsigned int overlap);
