@@ -539,8 +539,6 @@ namespace Step40
           1 /*robin_boundary*/,
           mpi_communicator);
 
-        optimized_schwarz_operator.continue_initialize();
-
         // First we need to set up and assemble the global system
         // setup_system();
         setup_local_system();

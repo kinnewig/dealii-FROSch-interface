@@ -183,7 +183,7 @@ FROSchOperator<dim, Number, MemorySpace>::extract_overlapping_map(
 template <int dim, typename Number, typename MemorySpace>
 void
 FROSchOperator<dim, Number, MemorySpace>::export_crs(
-  const Triangulation<dim> &triangulation)
+  const parallel::distributed::Triangulation<dim> &triangulation)
 {
   // First we need to get the partitioning of the triangulation
   auto partitioner =
@@ -196,7 +196,7 @@ FROSchOperator<dim, Number, MemorySpace>::export_crs(
   // Create the CrsGraph
   Teuchos::RCP<XMapType> locally_owned_set_map =
     Teuchos::rcp(new XTpetraMapType(locally_owned_set.make_tpetra_map_rcp()));
-  graph = Xpetra::CrsGraphFactory<int, size_type, NodeType>::Build(
+  dual_graph = Xpetra::CrsGraphFactory<int, size_type, NodeType>::Build(
     locally_owned_set_map, max_neighbors);
 
   for (auto &cell : triangulation.cell_iterators())
@@ -252,10 +252,10 @@ FROSchOperator<dim, Number, MemorySpace>::export_crs(
         }
 
       // Create the graph
-      graph->insertGlobalIndices(current_cell_index, neighbors());
+      dual_graph->insertGlobalIndices(current_cell_index, neighbors());
     }
 
-  graph->fillComplete();
+  dual_graph->fillComplete();
 }
 
 
@@ -277,17 +277,7 @@ FROSchOperator<dim, Number, MemorySpace>::initialize(
   optimized_schwarz = Teuchos::rcp(
     new OptimizedSchwarzType(x_system_matrix.getConst(), param_list));
 
-  optimized_schwarz->initialize(overlap, graph);
-}
-
-
-
-template <int dim, typename Number, typename MemorySpace>
-void
-FROSchOperator<dim, Number, MemorySpace>::continue_initialize()
-{
-  optimized_schwarz->continue_initialize(
-    Teuchos::rcp_const_cast<XMapType>(overlapping_map));
+  optimized_schwarz->initialize(overlap, dual_graph);
 }
 
 
@@ -298,7 +288,7 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   DoFHandler<dim>                           &dof_handler,
   parallel::distributed::Triangulation<dim> &triangulation,
   Triangulation<dim>                        &local_triangulation,
-  const unsigned int                         robin_boundary_id,
+  const unsigned int                         interface_boundary_id,
   MPI_Comm                                   communicator)
 {
   // ------------------------------------------------------------------------------------------
@@ -336,9 +326,9 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
       (size_type)triangulation.n_vertices(),
       vertex_array(),
       0,
-      graph->getMap()->getComm());
+      dual_graph->getMap()->getComm());
 
-  Teuchos::RCP<const XMapType> x_map = graph->getMap();
+  Teuchos::RCP<const XMapType> x_map = dual_graph->getMap();
 
 
   // ------------------------------------------------------------------------------------------
@@ -512,8 +502,8 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
 
               if (sub_cell_data[cell_counter][face] == -1)
                 // this indicates, we are on an internal edge, therefore
-                // we need to assign the robin_boundary_id
-                cell->face(face)->set_boundary_id(robin_boundary_id);
+                // we need to assign the interface_boundary_id
+                cell->face(face)->set_boundary_id(interface_boundary_id);
               else
                 cell->face(face)->set_boundary_id(
                   sub_cell_data[cell_counter][face]);
@@ -528,6 +518,11 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   // std::string name = "Grid-" + std::to_string(rank) + ".vtk";
   // std::ofstream output_file(name);
   // GridOut().write_vtk(local_triangulation, output_file);
+  
+  // Once the overlapping_map is copmuted, we need to hand over
+  // that map to the OptimizedFROSchOperator.
+  optimized_schwarz->continue_initialize(
+    Teuchos::rcp_const_cast<XMapType>(overlapping_map));
 }
 
 
@@ -551,15 +546,6 @@ FROSchOperator<dim, Number, MemorySpace>::compute(
     Teuchos::rcp(new XCrsMatrixWrapType(x_robin_crs_matrix));
 
   optimized_schwarz->compute(x_neumann_matrix, x_robin_matrix);
-}
-
-
-
-template <int dim, typename Number, typename MemorySpace>
-void
-FROSchOperator<dim, Number, MemorySpace>::compute()
-{
-  optimized_schwarz->compute();
 }
 
 
@@ -589,7 +575,7 @@ template <int dim, typename Number, typename MemorySpace>
 void
 FROSchOperator<dim, Number, MemorySpace>::reset()
 {
-  graph.reset();
+  dual_graph.reset();
   optimized_schwarz.reset();
   overlapping_map.reset();
 }
