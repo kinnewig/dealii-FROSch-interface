@@ -135,7 +135,7 @@ namespace Step40
   LaplaceProblem<dim>::LaplaceProblem()
     : mpi_communicator(MPI_COMM_WORLD)
     , local_dof_handler(local_triangulation)
-    , optimized_schwarz_operator(0 /*overlap*/)
+    , optimized_schwarz_operator("parameter_list.xml")
     , triangulation(mpi_communicator,
                     typename Triangulation<dim>::MeshSmoothing(
                       Triangulation<dim>::smoothing_on_refinement |
@@ -514,7 +514,7 @@ namespace Step40
         if (cycle == 0)
           {
             GridGenerator::hyper_cube(triangulation);
-            triangulation.refine_global(2);
+            triangulation.refine_global(4);
           }
         else
           {

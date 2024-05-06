@@ -66,9 +66,13 @@ namespace FROSch {
          * to construct the OptimizedSchwarzOperator.
          *
          * @param k The (global) system_matrix.
+         * @param dualGraph The dual graph of the grid.
+         * @param overlap The overlap for the Schwarz preconditioner.
          * @param parameterList The list of parameters for the OptimizedSchwarzOperator.
          */
         OptimizedSchwarzOperator(ConstXMatrixPtr  k,
+                                 int              overlap,
+                                 GraphPtr         dualGraph,
                                  ParameterListPtr parameterList);
 
         /**
@@ -78,28 +82,12 @@ namespace FROSch {
         initialize() override;
 
         /**
-         * @brief Initializes the OptimizedSchwarzOperator based on the given overlap and the dual graph.
+         * @brief Initializes the OptimizedSchwarzOperator based on the given overlap and the overlappingMap.
          *
          * This function creates the overlapping map for the cells (via calling OverlappingOperator::buildOverlappingMap()).
          * The map is computed based on the given overlap and the dual graph.
-         *
-         * @param overlap The overlap for the Schwarz preconditioner.
-         * @param dualGraph The dual graph of the grid.
-         * @return Error code. 0 if successful.
-         */
-        int 
-        initialize(int      overlap,
-                   GraphPtr dualGraph);
-
-        /**
-         * @brief Assigns the overlapping DoF map to the internal overlapping map.
-         *
-         * This function assigns takes the overlapping DoF map and assigns it
+         * And this function assigns takes the overlapping DoF map and assigns it
          * to the internal stores it in OverlappingMap_. 
-         *
-         * This function is forked out from initialize, as the overlapping cell 
-         * map is necessary to compute the overlapping dof map  (the overlapping 
-         * DoF map is computed in FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation). 
          *
          * After assigning the overlapping dof map to this->OverlappingMap_, the other functions, 
          * that are normally called in initialize are called (i.e. OverlappingOperator::initializeOverlappingOperator() 
@@ -109,7 +97,7 @@ namespace FROSch {
          * @return Error code. 0 if successful.
          */
         int 
-        continue_initialize(XMapPtr overlappingMap);
+        initialize(XMapPtr overlappingMap);
 
         /**
          * Not implemented. 
@@ -132,26 +120,6 @@ namespace FROSch {
          */
         int 
         compute(ConstXMatrixPtr neumannMatrix, ConstXMatrixPtr robinMatrix);
-
-        /**
-         * TODO: Temporary work arround, remove later!
-         *
-         * @brief Applies the operator to a MultiVector.
-         *
-         * @param x The input MultiVector.
-         * @param y The output MultiVector.
-         * @param mode The transpose mode. Default is NO_TRANS.
-         * @param alpha The scaling factor for the input. Default is 1.
-         * @param beta The scaling factor for the output. Default is 0.
-         */
-       	virtual void apply(const XMultiVector &x,
-                           XMultiVector &y,
-                           ETransp mode=NO_TRANS,
-                           SC alpha=ScalarTraits<SC>::one(),
-                           SC beta=ScalarTraits<SC>::zero()) const override
-        {
-        	OverlappingOperator<SC,LO,GO,NO>::apply(x,y,true,mode,alpha,beta);
-        };
 
         /**
          * @brief Redistributes the nodes_vector, cell_vector and auxillary_vector onto the overlapping domain.
@@ -218,11 +186,10 @@ namespace FROSch {
        * @brief Computes the subdomains matrices based on the system_matrix and the overlapping dof map.
        *
        * @param overlap The overlap for the Schwarz preconditioner. Must be >= 1.
-       * @param dualGraph The dual graph of the triangulation.
        * @return Error code. 0 if successful.
        */
       int 
-      buildOverlappingMap(int overlap, GraphPtr dualGraph);
+      buildOverlappingMap(int overlap);
     
       /**
        * @brief Extracts the local subdomain matrices from the system_matrix when it was not done earlier.

@@ -10,8 +10,11 @@
 #include <deal.II/lac/trilinos_tpetra_sparse_matrix.h>
 
 // FROSch
-#include <OptimizedOperator_decl.h>
-#include <OptimizedOperator_def.h>
+#include <FROSch_OptimizedOperator_decl.h>
+#include <FROSch_OptimizedOperator_def.h>
+#include <FROSch_OneLevelOptimizedPreconditioner_decl.hpp>
+#include <FROSch_OneLevelOptimizedPreconditioner_def.hpp>
+#include <Teuchos_ParameterList.hpp>
 
 DEAL_II_NAMESPACE_OPEN
 
@@ -77,7 +80,7 @@ public:
 
   // Optimized Schwarz
   using OptimizedSchwarzType =
-    FROSch::OptimizedSchwarzOperator<double, int, size_type, NodeType>;
+    FROSch::OneLevelOptimizedPreconditioner<double, int, size_type, NodeType>;
 
   /**
    * @brief Constructor for the FROSchOperator class.
@@ -89,7 +92,9 @@ public:
    *
    * @param overlap The overlap for the Schwarz preconditioner. It must be >= 1.
    */
-  FROSchOperator(unsigned int overlap);
+  FROSchOperator(Teuchos::RCP<Teuchos::ParameterList> parameter_list);
+
+  FROSchOperator(std::string xml_file);
 
   /*
    * @brief Computes the dual graph of the given triangulation.
@@ -277,7 +282,7 @@ private:
    * subdomains in the Schwarz preconditioner. It must be greater than or equal
    * to 1, where 1 means no overlap.
    */
-  const unsigned int overlap;
+  Teuchos::RCP<Teuchos::ParameterList> parameter_list;
 
   /**
    * @brief The dual graph of the triangulation.

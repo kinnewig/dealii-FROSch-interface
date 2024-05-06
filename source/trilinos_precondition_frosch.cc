@@ -1,5 +1,6 @@
 #include <deal.II/base/geometry_info.h>
 
+#include <Teuchos_ParameterList.hpp>
 #include <Xpetra_CrsGraphFactory.hpp>
 #include <trilinos_precondtion_frosch.h>
 
@@ -8,8 +9,17 @@
 DEAL_II_NAMESPACE_OPEN
 
 template <int dim, typename Number, typename MemorySpace>
-FROSchOperator<dim, Number, MemorySpace>::FROSchOperator(unsigned int overlap)
-  : overlap(overlap == 0 ? 0 : overlap - 1)
+FROSchOperator<dim, Number, MemorySpace>::FROSchOperator(
+  Teuchos::RCP<Teuchos::ParameterList> parameter_list)
+  : parameter_list(parameter_list)
+{}
+
+
+
+template <int dim, typename Number, typename MemorySpace>
+FROSchOperator<dim, Number, MemorySpace>::FROSchOperator(std::string xml_file)
+  : parameter_list(Teuchos::sublist(FROSch::getParametersFromXmlFile(xml_file),
+                                    "Preconditioner List"))
 {}
 
 
@@ -274,10 +284,8 @@ FROSchOperator<dim, Number, MemorySpace>::initialize(
   Teuchos::RCP<Teuchos::ParameterList> param_list(new Teuchos::ParameterList);
 
   param_list->set("Combine Values in Overlap", "Restricted");
-  optimized_schwarz = Teuchos::rcp(
-    new OptimizedSchwarzType(x_system_matrix.getConst(), param_list));
-
-  optimized_schwarz->initialize(overlap, dual_graph);
+  optimized_schwarz = Teuchos::rcp(new FROSch::OneLevelOptimizedPreconditioner(
+    x_system_matrix.getConst(), dual_graph, param_list));
 }
 
 
@@ -518,10 +526,10 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   // std::string name = "Grid-" + std::to_string(rank) + ".vtk";
   // std::ofstream output_file(name);
   // GridOut().write_vtk(local_triangulation, output_file);
-  
-  // Once the overlapping_map is copmuted, we need to hand over
-  // that map to the OptimizedFROSchOperator.
-  optimized_schwarz->continue_initialize(
+
+  // Once the overlapping_map is copmuted, we can initialize the
+  // OptimizedFROSchOperator.
+  optimized_schwarz->initialize(
     Teuchos::rcp_const_cast<XMapType>(overlapping_map));
 }
 

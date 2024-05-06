@@ -14,13 +14,18 @@ namespace FROSch {
 
     template <class SC,class LO,class GO,class NO>
     OptimizedSchwarzOperator<SC,LO,GO,NO>::OptimizedSchwarzOperator(
-        ConstXMatrixPtr k,
-        ParameterListPtr parameterList) :
-    OverlappingOperator<SC,LO,GO,NO> (k,parameterList)
+        ConstXMatrixPtr  k,
+        int              overlap,
+        GraphPtr         dualGraph,
+        ParameterListPtr parameterList) 
+    : OverlappingOperator<SC,LO,GO,NO> (k,parameterList)
+    , DualGraph_(dualGraph)
     {
         FROSCH_DETAILTIMER_START_LEVELID(
             optimizedSchwarzOperatorTime, 
             "OptimizedSchwarzOperator::OptimizedSchwarzOperator");
+
+        this->buildOverlappingMap(overlap);
     }
 
 
@@ -41,8 +46,8 @@ namespace FROSch {
     template <class SC,class LO,class GO,class NO>
     int
     OptimizedSchwarzOperator<SC,LO,GO,NO>::initialize(
-        int      overlap,
-        GraphPtr dualGraph)
+        XMapPtr overlappingMap
+    )
     {
         FROSCH_TIMER_START_LEVELID(
             initializeTime, 
@@ -79,18 +84,6 @@ namespace FROSch {
             << endl;
         }
 
-        this->buildOverlappingMap(overlap, dualGraph);
-
-        return 0; // RETURN VALUE!!!
-    }
-
-
-
-    template <class SC, class LO, class GO, class NO>
-    int 
-    OptimizedSchwarzOperator<SC,LO,GO,NO>::continue_initialize(
-        XMapPtr overlappingMap)
-    {
         this->OverlappingMatrix_ = this->K_;
         this->OverlappingMap_    = overlappingMap;
         OverlappingGraph_        = this->OverlappingMatrix_->getCrsGraph();
@@ -100,7 +93,7 @@ namespace FROSch {
         this->updateLocalOverlappingMatrices_Symbolic();
 
         this->IsInitialized_ = true;
-        this->IsComputed_ = false;
+        this->IsComputed_    = false;
 
         return 0; // RETURN VALUE!!!
     }
@@ -240,9 +233,7 @@ namespace FROSch {
 
     template <class SC,class LO,class GO,class NO>
     int 
-    OptimizedSchwarzOperator<SC,LO,GO,NO>::buildOverlappingMap(
-        int      overlap,
-        GraphPtr dualGraph)
+    OptimizedSchwarzOperator<SC,LO,GO,NO>::buildOverlappingMap(int overlap)
     {
         FROSCH_DETAILTIMER_START_LEVELID(
             buildOverlappingMatricesTime,
@@ -260,7 +251,6 @@ namespace FROSch {
         }
         // ====================================================================================
 
-        DualGraph_             = dualGraph;
         OverlappingGraph_      = DualGraph_;
         OverlappingElementMap_ = DualGraph_->getColMap();
 
