@@ -1,9 +1,7 @@
 #ifndef _FROSCH_OPTIMIZEDOPERATOR_DEF_HPP
 #define _FROSCH_OPTIMIZEDOPERATOR_DEF_HPP
 
-#include "OptimizedOperator_decl.h"
-#include "mpi.h"
-#include <Teuchos_VerbosityLevel.hpp>
+#include "FROSch_OptimizedOperator_decl.h"
 #include <ostream>
 
 namespace FROSch {
