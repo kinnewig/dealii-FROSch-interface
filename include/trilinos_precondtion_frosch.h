@@ -14,6 +14,8 @@
 #include <FROSch_OptimizedOperator_def.h>
 #include <FROSch_OneLevelOptimizedPreconditioner_decl.hpp>
 #include <FROSch_OneLevelOptimizedPreconditioner_def.hpp>
+#include <FROSch_TwoLevelOptimizedPreconditioner_decl.hpp>
+#include <FROSch_TwoLevelOptimizedPreconditioner_def.hpp>
 #include <Teuchos_ParameterList.hpp>
 
 DEAL_II_NAMESPACE_OPEN
@@ -81,6 +83,9 @@ public:
   // Optimized Schwarz
   using OptimizedSchwarzType =
     FROSch::OneLevelOptimizedPreconditioner<double, int, size_type, NodeType>;
+  // Two Level Operator
+  //using OptimizedSchwarzType =
+  //  FROSch::TwoLevelOptimizedPreconditioner<double, int, size_type, NodeType>;
 
   /**
    * @brief Constructor for the FROSchOperator class.

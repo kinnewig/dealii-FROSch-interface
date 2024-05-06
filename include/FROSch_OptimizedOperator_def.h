@@ -382,6 +382,7 @@ namespace FROSch {
         
 
         Teuchos::RCP<XMatrix> overlappingMatrix = null;
+        //MatrixMatrix<SC,LO,GO,NO>::TwoMatrixAdd(*NeumannMatrix_, false, 1.0, *RobinMatrix_, false, 1.0, overlappingMatrix, *out);
         MatrixMatrix<SC,LO,GO,NO>::TwoMatrixAdd(*this->OverlappingMatrix_, false, 1.0, *RobinMatrix_, false, 1.0, overlappingMatrix, *out);
         overlappingMatrix->fillComplete();
         this->OverlappingMatrix_ = overlappingMatrix;

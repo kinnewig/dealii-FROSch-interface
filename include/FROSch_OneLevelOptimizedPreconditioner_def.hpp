@@ -233,7 +233,7 @@ namespace FROSch {
     template <class SC,class LO,class GO,class NO>
     string OneLevelOptimizedPreconditioner<SC,LO,GO,NO>::description() const
     {
-        return "One-Level Optimized Preconditioner";
+        return "One-Level Optimized Schwarz Preconditioner";
     }
 
 

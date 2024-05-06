@@ -281,11 +281,13 @@ FROSchOperator<dim, Number, MemorySpace>::initialize(
   Teuchos::RCP<XMatrixType> x_system_matrix =
     Teuchos::rcp(new XCrsMatrixWrapType(x_system_crs_matrix));
 
-  Teuchos::RCP<Teuchos::ParameterList> param_list(new Teuchos::ParameterList);
-
-  param_list->set("Combine Values in Overlap", "Restricted");
+  // One Level Operator:
   optimized_schwarz = Teuchos::rcp(new FROSch::OneLevelOptimizedPreconditioner(
-    x_system_matrix.getConst(), dual_graph, param_list));
+    x_system_matrix.getConst(), dual_graph, parameter_list));
+
+  // Two Level Operator:
+  //optimized_schwarz = Teuchos::rcp(new FROSch::TwoLevelOptimizedPreconditioner(
+  //  x_system_matrix.getConst(), dual_graph, parameter_list));
 }
 
 
@@ -529,8 +531,15 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
 
   // Once the overlapping_map is copmuted, we can initialize the
   // OptimizedFROSchOperator.
-  optimized_schwarz->initialize(
-    Teuchos::rcp_const_cast<XMapType>(overlapping_map));
+  
+  // One Level Operator
+  optimized_schwarz->initialize(Teuchos::rcp_const_cast<XMapType>(overlapping_map));
+
+  // Two Level Operator
+  //optimized_schwarz->initialize(
+  //  dim,              /*dimension*/
+  //  1,                /*dofs per node*/
+  //  Teuchos::rcp_const_cast<XMapType>(overlapping_map));
 }
 
 
