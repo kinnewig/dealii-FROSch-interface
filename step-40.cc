@@ -73,7 +73,7 @@ namespace Step40
     LaplaceProblem();
 
     void
-    run();
+    run(unsigned int refinements, double alpha, double beta);
 
   private:
     void
@@ -90,7 +90,7 @@ namespace Step40
     // --------------------------------------------------------
     // additional functions
     void
-    assemble_local_system();
+    assemble_local_system(double alpha, double beta);
     void
     setup_local_system();
 
@@ -314,7 +314,7 @@ namespace Step40
 
   template <int dim>
   void
-  LaplaceProblem<dim>::assemble_local_system()
+  LaplaceProblem<dim>::assemble_local_system(double alpha, double beta)
   {
     const QGauss<dim>     quadrature_formula(fe.degree + 1);
     const QGauss<dim - 1> quadrature_face_formula(fe.degree);
@@ -339,12 +339,12 @@ namespace Step40
     FullMatrix<double> cell_robin_matrix(dofs_per_cell, dofs_per_cell);
     Vector<double>     cell_rhs(dofs_per_cell);
 
-    const double alpha = 1; // 0.0853 * std::sqrt(2 * numbers::PI);
-    const double beta  = 0; //-0.0128 * std::sqrt(2 * numbers::PI);
+    //const double alpha =  0.0853 * std::sqrt(2 * numbers::PI);
+    //const double beta  =  - 0.0128 * std::sqrt(2 * numbers::PI);
 
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
     unsigned int                         cell_counter = 0;
-    for (const auto &cell : local_dof_handler.active_cell_iterators())
+    for (auto &cell : local_dof_handler.active_cell_iterators())
       {
         if (!cell->is_locally_owned())
           continue;
@@ -388,30 +388,31 @@ namespace Step40
                         cell_robin_matrix(i, j) +=
                           ((alpha *
                             fe_face_values.shape_value(i, q_face_point) *
-                            fe_face_values.shape_value(j, q_face_point)) -
+                            fe_face_values.shape_value(j, q_face_point)) +
                            (beta * fe_face_values.shape_grad(i, q_face_point) *
-                            fe_face_values.normal_vector(q_face_point) *
-                            fe_face_values.shape_value(j, q_face_point))) *
+                            beta * fe_face_values.shape_grad(j, q_face_point)
+                            )) *
                           fe_face_values.JxW(q_face_point);
                       }
                   }
               }
           }
 
-        for (unsigned int i = 0; i < dofs_per_cell; ++i)
-          local_dof_indices[i] =
-            optimized_schwarz_operator.get_dof(cell_counter, i);
+        cell->get_dof_indices(local_dof_indices);
 
         for (unsigned int i = 0; i < dofs_per_cell; ++i)
           for (unsigned int j = 0; j < dofs_per_cell; ++j)
             {
-              local_neumann_matrix.add(local_dof_indices[i],
-                                       local_dof_indices[j],
-                                       cell_neumann_matrix(i, j));
+              //local_neumann_matrix.add(local_dof_indices[i],
+              //                         local_dof_indices[j],
+              //                         cell_neumann_matrix(i, j));
               local_robin_matrix.add(local_dof_indices[i],
                                      local_dof_indices[j],
                                      cell_robin_matrix(i, j));
             }
+
+        local_constraints.distribute_local_to_global(
+          cell_neumann_matrix, cell_rhs, local_dof_indices, local_neumann_matrix, local_system_rhs);
 
         ++cell_counter;
       }
@@ -503,7 +504,7 @@ namespace Step40
 
   template <int dim>
   void
-  LaplaceProblem<dim>::run()
+  LaplaceProblem<dim>::run(unsigned int refinements, double alpha, double beta)
   {
     const unsigned int n_cycles = 1;
     for (unsigned int cycle = 0; cycle < n_cycles; ++cycle)
@@ -514,7 +515,7 @@ namespace Step40
         if (cycle == 0)
           {
             GridGenerator::hyper_cube(triangulation);
-            triangulation.refine_global(4);
+            triangulation.refine_global(refinements);
           }
         else
           {
@@ -542,7 +543,10 @@ namespace Step40
         // First we need to set up and assemble the global system
         // setup_system();
         setup_local_system();
-        assemble_local_system();
+
+        optimized_schwarz_operator.create_overlapping_map(local_dof_handler, dof_handler.n_dofs(), mpi_communicator);
+
+        assemble_local_system(alpha, beta);
 
         optimized_schwarz_operator.compute(local_neumann_matrix,
                                            local_robin_matrix);
@@ -581,7 +585,24 @@ main(int argc, char *argv[])
       Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
 
       LaplaceProblem<2> laplace_problem_2d;
-      laplace_problem_2d.run();
+
+      unsigned int refinements;
+      double alpha, beta;
+      if (argc == 4)
+        {
+          refinements = std::stoi(argv[1]);
+          alpha       = std::stod(argv[2]);
+          beta        = std::stod(argv[3]);
+        }
+      else
+        {
+          refinements = 5;
+          alpha       = 1.0;
+          beta        = 0.0;
+        }
+
+
+      laplace_problem_2d.run(refinements, alpha, beta);
     }
   catch (std::exception &exc)
     {

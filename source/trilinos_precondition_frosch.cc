@@ -77,19 +77,6 @@ FROSchOperator<dim, Number, MemorySpace>::extract_auxillary_list(
   const size_t n_vectors    = mv->getNumVectors();
   const size_t local_length = mv->getLocalLength();
 
-  index_list.resize(local_length);
-  for (unsigned int j = 0; j < local_length; ++j)
-    index_list[j] = j;
-
-  {
-    auto data = mv->getData(mv->getNumVectors() - 1);
-    std::sort(index_list.begin(),
-              index_list.end(),
-              [data](unsigned int a, unsigned int b) {
-                return data[a] < data[b];
-              });
-  }
-
   std::vector<std::vector<int>> sub_cell_data(local_length,
                                               std::vector<int>(n_vectors));
   for (unsigned int i = 0; i < n_vectors; ++i)
@@ -185,7 +172,10 @@ FROSchOperator<dim, Number, MemorySpace>::extract_overlapping_map(
     Utilities::Trilinos::internal::make_rcp<Teuchos::MpiComm<int>>(
       communicator)));
 
-  overlapping_map = FROSch::SortMapByGlobalIndex(overlapping_map);
+  // overlapping_map = FROSch::SortMapByGlobalIndex(overlapping_map);
+
+  // auto out = Teuchos::getFancyOStream (Teuchos::rcpFromRef (std::cout));
+  // overlapping_map->describe(*out, Teuchos::VERB_EXTREME);
 }
 
 
@@ -286,7 +276,8 @@ FROSchOperator<dim, Number, MemorySpace>::initialize(
     x_system_matrix.getConst(), dual_graph, parameter_list));
 
   // Two Level Operator:
-  //optimized_schwarz = Teuchos::rcp(new FROSch::TwoLevelOptimizedPreconditioner(
+  // optimized_schwarz = Teuchos::rcp(new
+  // FROSch::TwoLevelOptimizedPreconditioner(
   //  x_system_matrix.getConst(), dual_graph, parameter_list));
 }
 
@@ -305,6 +296,14 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   // Get the local to global map:
   std::map<unsigned int, types::global_vertex_index> local_to_global =
     GridTools::compute_local_to_global_vertex_index_map(triangulation);
+
+  // IndexSet locally_relevant_dofs =
+  // DoFTools::extract_locally_relevant_dofs(dof_handler);
+  Teuchos::RCP<XMapType> uniqueMap = Teuchos::rcp(new XTpetraMapType(
+    dof_handler.locally_owned_dofs().make_tpetra_map_rcp(communicator, true)));
+
+  // auto out = Teuchos::getFancyOStream (Teuchos::rcpFromRef (std::cout));
+  // uniqueMap->describe(*out, Teuchos::VERB_EXTREME);
 
   // creat global_to_local
   Teuchos::Array<long long> vertex_array(
@@ -447,7 +446,16 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
       cell->get_dof_indices(local_dof_indices);
       for (unsigned int i = 0; i < dofs_per_cell; ++i)
         auxillary_vector_data[(2 * faces_per_cell) + i][cell_counter] =
-          (size_type)local_dof_indices[i];
+          local_dof_indices[i];
+      //(size_type)uniqueMap->getGlobalElement(local_dof_indices[i]);
+
+      // int rank;
+      // MPI_Comm_rank(communicator, &rank);
+      // if (rank == 1)
+      //   for (unsigned int i = 0; i < dofs_per_cell; ++i)
+      //     std::cout << local_dof_indices[i] << ": "
+      //     <<(size_type)uniqueMap->getGlobalElement(local_dof_indices[i]) <<
+      //     std::endl;
 
       // Add information about the system to the auxiallary list:
       auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 0]
@@ -482,7 +490,7 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   // read in the auxillary_data
   extract_index_list(auxillary_vector);
   extract_dof_index_list(auxillary_vector);
-  extract_overlapping_map(auxillary_vector, dof_handler.n_dofs(), communicator);
+  //extract_overlapping_map(auxillary_vector, dof_handler.n_dofs(), communicator);
 
   // cast back: SubCellData
   std::vector<std::vector<int>> sub_cell_data =
@@ -531,15 +539,51 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
 
   // Once the overlapping_map is copmuted, we can initialize the
   // OptimizedFROSchOperator.
-  
-  // One Level Operator
-  optimized_schwarz->initialize(Teuchos::rcp_const_cast<XMapType>(overlapping_map));
+
 
   // Two Level Operator
-  //optimized_schwarz->initialize(
+  // optimized_schwarz->initialize(
   //  dim,              /*dimension*/
   //  1,                /*dofs per node*/
   //  Teuchos::rcp_const_cast<XMapType>(overlapping_map));
+}
+
+
+
+template <int dim, typename Number, typename MemorySpace>
+void
+FROSchOperator<dim, Number, MemorySpace>::create_overlapping_map(
+  DoFHandler<dim> &local_dof_handler,
+  unsigned int     global_size,
+  MPI_Comm         communicator)
+{
+  const unsigned int dofs_per_cell = local_dof_handler.get_fe().n_dofs_per_cell();
+
+  std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell, -1);
+
+  Teuchos::Array<size_type> array(local_dof_handler.n_locally_owned_dofs());
+
+  unsigned int cell_counter = 0;
+  for (auto &cell : local_dof_handler.active_cell_iterators())
+    {
+      cell->get_dof_indices(local_dof_indices);
+
+      for(unsigned int i = 0; i < dofs_per_cell; ++i)
+        array[local_dof_indices[i]] = dof_index_list[cell_counter][i];
+
+      ++cell_counter;
+    }
+
+  overlapping_map = Teuchos::rcp(new XTpetraMapType(
+    global_size,
+    array,
+    0,
+    Utilities::Trilinos::internal::make_rcp<Teuchos::MpiComm<int>>(
+      communicator)));
+
+  // One Level Operator
+  optimized_schwarz->initialize(
+    Teuchos::rcp_const_cast<XMapType>(overlapping_map));
 }
 
 

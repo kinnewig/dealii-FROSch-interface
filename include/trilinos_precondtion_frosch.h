@@ -4,16 +4,18 @@
 
 #include <deal.II/distributed/tria.h>
 
+#include <deal.II/dofs/dof_tools.h>
+
 #include <deal.II/grid/grid_out.h>
 #include <deal.II/grid/grid_tools.h>
 
 #include <deal.II/lac/trilinos_tpetra_sparse_matrix.h>
 
 // FROSch
-#include <FROSch_OptimizedOperator_decl.h>
-#include <FROSch_OptimizedOperator_def.h>
 #include <FROSch_OneLevelOptimizedPreconditioner_decl.hpp>
 #include <FROSch_OneLevelOptimizedPreconditioner_def.hpp>
+#include <FROSch_OptimizedOperator_decl.h>
+#include <FROSch_OptimizedOperator_def.h>
 #include <FROSch_TwoLevelOptimizedPreconditioner_decl.hpp>
 #include <FROSch_TwoLevelOptimizedPreconditioner_def.hpp>
 #include <Teuchos_ParameterList.hpp>
@@ -84,7 +86,7 @@ public:
   using OptimizedSchwarzType =
     FROSch::OneLevelOptimizedPreconditioner<double, int, size_type, NodeType>;
   // Two Level Operator
-  //using OptimizedSchwarzType =
+  // using OptimizedSchwarzType =
   //  FROSch::TwoLevelOptimizedPreconditioner<double, int, size_type, NodeType>;
 
   /**
@@ -152,6 +154,11 @@ public:
     Triangulation<dim>                        &local_triangulation,
     const unsigned int                         interface_boundary_id,
     MPI_Comm                                   communicator);
+
+  void
+  create_overlapping_map(DoFHandler<dim> &local_dof_handler,
+                         unsigned int     global_size,
+                         MPI_Comm         communicator);
 
   /*
    * @brief Computes the Preconditioner
