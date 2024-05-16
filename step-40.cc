@@ -36,6 +36,7 @@
 #include <deal.II/dofs/dof_tools.h>
 
 #include <deal.II/fe/fe_q.h>
+#include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_values.h>
 
 #include <deal.II/grid/grid_generator.h>
@@ -114,7 +115,7 @@ namespace Step40
     // Parallel distributed triangulation
     parallel::distributed::Triangulation<dim> triangulation;
 
-    FE_Q<dim>       fe;
+    FESystem<dim>       fe;
     DoFHandler<dim> dof_handler;
 
     IndexSet locally_owned_dofs;
@@ -140,7 +141,7 @@ namespace Step40
                     typename Triangulation<dim>::MeshSmoothing(
                       Triangulation<dim>::smoothing_on_refinement |
                       Triangulation<dim>::smoothing_on_coarsening))
-    , fe(1)
+    , fe(FE_Q<dim>(1), 2)
     , dof_handler(triangulation)
     , pcout(std::cout,
             (Utilities::MPI::this_mpi_process(mpi_communicator) == 0))
@@ -177,7 +178,7 @@ namespace Step40
     DoFTools::make_hanging_node_constraints(dof_handler, constraints);
     VectorTools::interpolate_boundary_values(dof_handler,
                                              0,
-                                             Functions::ZeroFunction<dim>(),
+                                             Functions::ZeroFunction<dim>(2),
                                              constraints);
     constraints.close();
 
@@ -219,6 +220,13 @@ namespace Step40
 
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
+    const FEValuesExtractors::Scalar E_re(0);
+    const FEValuesExtractors::Scalar E_im(1);
+    std::vector<FEValuesExtractors::Scalar> vec(2);
+    vec[0] = E_re;
+    vec[1] = E_im;
+
+
     for (const auto &cell : dof_handler.active_cell_iterators())
       {
         if (!cell->is_locally_owned())
@@ -241,12 +249,19 @@ namespace Step40
 
             for (unsigned int i = 0; i < dofs_per_cell; ++i)
               {
-                for (unsigned int j = 0; j < dofs_per_cell; ++j)
-                  cell_matrix(i, j) += fe_values.shape_grad(i, q_point) *
-                                       fe_values.shape_grad(j, q_point) *
-                                       fe_values.JxW(q_point);
+                const unsigned int block_index_i =
+                  fe.system_to_block_index(i).first;
 
-                cell_rhs(i) += rhs_value * fe_values.shape_value(i, q_point) *
+                for (unsigned int j = 0; j < dofs_per_cell; ++j)
+                  {
+                    const unsigned int block_index_j =
+                      fe.system_to_block_index(j).first;
+                    cell_matrix(i, j) += fe_values[vec[block_index_i]].gradient(i, q_point) *
+                                         fe_values[vec[block_index_j]].gradient(j, q_point) *
+                                         fe_values.JxW(q_point);
+                  }
+
+                cell_rhs(i) += rhs_value * fe_values[vec[block_index_i]].value(i, q_point) *
                                fe_values.JxW(q_point);
               }
           }
@@ -285,7 +300,7 @@ namespace Step40
                                             local_constraints);
     VectorTools::interpolate_boundary_values(local_dof_handler,
                                              0,
-                                             Functions::ZeroFunction<dim>(),
+                                             Functions::ZeroFunction<dim>(2),
                                              local_constraints);
     local_constraints.close();
 
@@ -339,6 +354,13 @@ namespace Step40
     FullMatrix<double> cell_robin_matrix(dofs_per_cell, dofs_per_cell);
     Vector<double>     cell_rhs(dofs_per_cell);
 
+
+    const FEValuesExtractors::Scalar E_re(0);
+    const FEValuesExtractors::Scalar E_im(1);
+    std::vector<FEValuesExtractors::Scalar> vec(2);
+    vec[0] = E_re;
+    vec[1] = E_im;
+
     //const double alpha =  0.0853 * std::sqrt(2 * numbers::PI);
     //const double beta  =  - 0.0128 * std::sqrt(2 * numbers::PI);
 
@@ -359,10 +381,18 @@ namespace Step40
           {
             for (unsigned int i = 0; i < dofs_per_cell; ++i)
               {
+                const unsigned int block_index_i =
+                  fe.system_to_block_index(i).first;
+
                 for (unsigned int j = 0; j < dofs_per_cell; ++j)
-                  cell_neumann_matrix(i, j) +=
-                    fe_values.shape_grad(i, q_point) *
-                    fe_values.shape_grad(j, q_point) * fe_values.JxW(q_point);
+                  {
+                    const unsigned int block_index_j =
+                      fe.system_to_block_index(j).first;
+
+                    cell_neumann_matrix(i, j) +=
+                      fe_values[vec[block_index_i]].gradient(i, q_point) *
+                      fe_values[vec[block_index_j]].gradient(j, q_point) * fe_values.JxW(q_point);
+                  }
               }
           }
 
@@ -383,14 +413,19 @@ namespace Step40
               {
                 for (const unsigned int i : fe_face_values.dof_indices())
                   {
+                    const unsigned int block_index_i =
+                      fe.system_to_block_index(i).first;
                     for (const unsigned int j : fe_face_values.dof_indices())
                       {
+                        const unsigned int block_index_j =
+                          fe.system_to_block_index(j).first;
+
                         cell_robin_matrix(i, j) +=
                           ((alpha *
-                            fe_face_values.shape_value(i, q_face_point) *
-                            fe_face_values.shape_value(j, q_face_point)) +
-                           (beta * fe_face_values.shape_grad(i, q_face_point) *
-                            beta * fe_face_values.shape_grad(j, q_face_point)
+                            fe_face_values[vec[block_index_i]].value(i, q_face_point) *
+                            fe_face_values[vec[block_index_j]].value(j, q_face_point)) +
+                           (beta * fe_face_values[vec[block_index_i]].gradient(i, q_face_point) *
+                            beta * fe_face_values[vec[block_index_j]].gradient(j, q_face_point)
                             )) *
                           fe_face_values.JxW(q_face_point);
                       }
@@ -485,9 +520,21 @@ namespace Step40
   void
   LaplaceProblem<dim>::output_results(const unsigned int cycle) const
   {
+
+    std::vector<std::string> solution_names;
+    solution_names.push_back("u_1");
+    solution_names.push_back("u_2");
+
+    std::vector<DataComponentInterpretation::DataComponentInterpretation>
+      data_component_interpretation(
+        2, DataComponentInterpretation::component_is_scalar);
+
     DataOut<dim> data_out;
     data_out.attach_dof_handler(dof_handler);
-    data_out.add_data_vector(locally_relevant_solution, "u");
+    data_out.add_data_vector(locally_relevant_solution,
+                             solution_names,
+                             DataOut<dim>::type_dof_data,
+                             data_component_interpretation);
 
     Vector<float> subdomain(triangulation.n_active_cells());
     for (unsigned int i = 0; i < subdomain.size(); ++i)
