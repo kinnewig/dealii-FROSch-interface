@@ -1,10 +1,10 @@
 <ParameterList name="FROSch Example">
     <ParameterList name="Preconditioner List">
-        <Parameter name="OverlappingOperator Type"         type="string" value="OptimizedOperator"/>
+        <Parameter name="OverlappingOperator Type"         type="string" value="AlgebraicOverlappingOperator"/>
         <Parameter name="Dimension"                        type="int"    value="2"/>
-        <Parameter name="Overlap"                          type="int"    value="20"/>
+        <Parameter name="Overlap"                          type="int"    value="4"/>
         <ParameterList name="AlgebraicOverlappingOperator">
-            <Parameter name="Combine Values in Overlap"    type="string" value="Averaging"/>
+            <Parameter name="Combine Values in Overlap"    type="string" value="Avergaing"/>
             <ParameterList name="Solver">
                 <Parameter name="SolverType"               type="string" value="Amesos2"/>
                 <Parameter name="Solver"                   type="string" value="Umfpack"/>

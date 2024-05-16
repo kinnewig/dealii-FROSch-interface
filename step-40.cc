@@ -50,14 +50,16 @@
 #include <deal.II/lac/trilinos_tpetra_solver.h>
 #include <deal.II/lac/trilinos_tpetra_sparse_matrix.h>
 #include <deal.II/lac/trilinos_tpetra_vector.h>
+#include <deal.II/lac/trilinos_tpetra_precondition.h>
 #include <deal.II/lac/vector.h>
 
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/error_estimator.h>
 #include <deal.II/numerics/vector_tools.h>
+#include <Teuchos_XMLParameterListCoreHelpers.hpp>
 
 // Optimized Schwarz Preconditioner
-#include <trilinos_precondtion_frosch.h>
+//#include <trilinos_precondtion_frosch.h>
 
 #include <iostream>
 #include <string>
@@ -87,27 +89,10 @@ namespace Step40
     void
     output_results(const unsigned int cycle) const;
 
-    // --------------------------------------------------------
-    // additional functions
-    void
-    assemble_local_system(double alpha, double beta);
-    void
-    setup_local_system();
-
     // === Member ===
     MPI_Comm mpi_communicator;
 
-    AffineConstraints<double> local_constraints;
-
-    // Locally problem
-    Triangulation<dim>                                  local_triangulation;
-    DoFHandler<dim>                                     local_dof_handler;
-    LinearAlgebra::TpetraWrappers::SparseMatrix<double> local_neumann_matrix;
-    LinearAlgebra::TpetraWrappers::SparseMatrix<double> local_robin_matrix;
-    LinearAlgebra::TpetraWrappers::Vector<double>       local_system_rhs;
-
-    FROSchOperator<dim, double> optimized_schwarz_operator;
-
+    LinearAlgebra::TpetraWrappers::PreconditionFROSch<double> optimized_schwarz_operator;
     // --------------------------------------------------------
 
 
@@ -134,8 +119,6 @@ namespace Step40
   template <int dim>
   LaplaceProblem<dim>::LaplaceProblem()
     : mpi_communicator(MPI_COMM_WORLD)
-    , local_dof_handler(local_triangulation)
-    , optimized_schwarz_operator("parameter_list.xml")
     , triangulation(mpi_communicator,
                     typename Triangulation<dim>::MeshSmoothing(
                       Triangulation<dim>::smoothing_on_refinement |
@@ -261,166 +244,6 @@ namespace Step40
   }
 
 
-  template <int dim>
-  void
-  LaplaceProblem<dim>::setup_local_system()
-  {
-    local_dof_handler.distribute_dofs(fe);
-
-    // TODO: The local problem is only sequentiel, but this is the typically
-    // parallel assembly
-    IndexSet local_locally_owned_dofs = local_dof_handler.locally_owned_dofs();
-    IndexSet local_locally_relevant_dofs =
-      DoFTools::extract_locally_relevant_dofs(local_dof_handler);
-
-    // Remark: The local vectors only get the MPI_Comm of the current rank
-    local_system_rhs.reinit(local_locally_owned_dofs,
-                            local_locally_relevant_dofs,
-                            MPI_COMM_SELF,
-                            true);
-
-    local_constraints.clear();
-    local_constraints.reinit(local_locally_relevant_dofs);
-    DoFTools::make_hanging_node_constraints(local_dof_handler,
-                                            local_constraints);
-    VectorTools::interpolate_boundary_values(local_dof_handler,
-                                             0,
-                                             Functions::ZeroFunction<dim>(),
-                                             local_constraints);
-    local_constraints.close();
-
-    DynamicSparsityPattern dsp(local_locally_relevant_dofs);
-
-    DoFTools::make_sparsity_pattern(local_dof_handler,
-                                    dsp,
-                                    local_constraints,
-                                    false);
-    SparsityTools::distribute_sparsity_pattern(dsp,
-                                               local_locally_owned_dofs,
-                                               MPI_COMM_SELF,
-                                               local_locally_relevant_dofs);
-
-    local_neumann_matrix.reinit(local_locally_owned_dofs,
-                                local_locally_owned_dofs,
-                                dsp,
-                                MPI_COMM_SELF);
-    local_robin_matrix.reinit(local_locally_owned_dofs,
-                              local_locally_owned_dofs,
-                              dsp,
-                              MPI_COMM_SELF);
-  }
-
-
-
-  template <int dim>
-  void
-  LaplaceProblem<dim>::assemble_local_system(double alpha, double beta)
-  {
-    const QGauss<dim>     quadrature_formula(fe.degree + 1);
-    const QGauss<dim - 1> quadrature_face_formula(fe.degree);
-
-    FEValues<dim> fe_values(fe,
-                            quadrature_formula,
-                            update_values | update_gradients |
-                              update_quadrature_points | update_JxW_values);
-
-    FEFaceValues<dim> fe_face_values(fe,
-                                     quadrature_face_formula,
-                                     update_values | update_gradients |
-                                       update_normal_vectors |
-                                       update_quadrature_points |
-                                       update_JxW_values);
-
-    const unsigned int dofs_per_cell   = fe.n_dofs_per_cell();
-    const unsigned int n_q_points      = quadrature_formula.size();
-    const unsigned int n_q_face_points = quadrature_face_formula.size();
-
-    FullMatrix<double> cell_neumann_matrix(dofs_per_cell, dofs_per_cell);
-    FullMatrix<double> cell_robin_matrix(dofs_per_cell, dofs_per_cell);
-    Vector<double>     cell_rhs(dofs_per_cell);
-
-    //const double alpha =  0.0853 * std::sqrt(2 * numbers::PI);
-    //const double beta  =  - 0.0128 * std::sqrt(2 * numbers::PI);
-
-    std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-    unsigned int                         cell_counter = 0;
-    for (auto &cell : local_dof_handler.active_cell_iterators())
-      {
-        if (!cell->is_locally_owned())
-          continue;
-
-        cell_neumann_matrix = 0.;
-        cell_robin_matrix   = 0.;
-        cell_rhs            = 0.;
-
-        fe_values.reinit(cell);
-
-        for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
-          {
-            for (unsigned int i = 0; i < dofs_per_cell; ++i)
-              {
-                for (unsigned int j = 0; j < dofs_per_cell; ++j)
-                  cell_neumann_matrix(i, j) +=
-                    fe_values.shape_grad(i, q_point) *
-                    fe_values.shape_grad(j, q_point) * fe_values.JxW(q_point);
-              }
-          }
-
-        for (unsigned int face = 0; face < GeometryInfo<dim>::faces_per_cell;
-             ++face)
-          {
-            // here we need to skip all not Robin boundaries
-            if (!cell->face(face)->at_boundary())
-              continue;
-
-            if (cell->face(face)->boundary_id() != 1)
-              continue;
-
-            fe_face_values.reinit(cell, face);
-
-            for (unsigned int q_face_point = 0; q_face_point < n_q_face_points;
-                 ++q_face_point)
-              {
-                for (const unsigned int i : fe_face_values.dof_indices())
-                  {
-                    for (const unsigned int j : fe_face_values.dof_indices())
-                      {
-                        cell_robin_matrix(i, j) +=
-                          ((alpha *
-                            fe_face_values.shape_value(i, q_face_point) *
-                            fe_face_values.shape_value(j, q_face_point)) +
-                           (beta * fe_face_values.shape_grad(i, q_face_point) *
-                            beta * fe_face_values.shape_grad(j, q_face_point)
-                            )) *
-                          fe_face_values.JxW(q_face_point);
-                      }
-                  }
-              }
-          }
-
-        cell->get_dof_indices(local_dof_indices);
-
-        for (unsigned int i = 0; i < dofs_per_cell; ++i)
-          for (unsigned int j = 0; j < dofs_per_cell; ++j)
-            {
-              //local_neumann_matrix.add(local_dof_indices[i],
-              //                         local_dof_indices[j],
-              //                         cell_neumann_matrix(i, j));
-              local_robin_matrix.add(local_dof_indices[i],
-                                     local_dof_indices[j],
-                                     cell_robin_matrix(i, j));
-            }
-
-        local_constraints.distribute_local_to_global(
-          cell_neumann_matrix, cell_rhs, local_dof_indices, local_neumann_matrix, local_system_rhs);
-
-        ++cell_counter;
-      }
-
-    local_neumann_matrix.compress(VectorOperation::add);
-    local_robin_matrix.compress(VectorOperation::add);
-  }
-
 
   template <int dim>
   void
@@ -430,8 +253,7 @@ namespace Step40
     LinearAlgebra::TpetraWrappers::Vector<double>
       completely_distributed_solution(locally_owned_dofs, mpi_communicator);
 
-    Teuchos::RCP<Teuchos::ParameterList> parameter_list =
-      Teuchos::parameterList();
+    Teuchos::RCP<Teuchos::ParameterList> parameter_list = Teuchos::getParametersFromXmlFile("parameter_list.xml");
 
     SolverControl solver_control(dof_handler.n_dofs(), 1e-12);
 
@@ -439,19 +261,12 @@ namespace Step40
       SolverXpetra<double, Tpetra::KokkosClassic::DefaultNode::DefaultNodeType>
         solver(solver_control, parameter_list);
 
-    LinearAlgebra::TpetraWrappers::XpetraOperatorWrap<double> preconditioner;
-    preconditioner.initialize(optimized_schwarz_operator.get_precondioner());
-
-    // As a refernece it is intresting to use the default (Algebraic) Schwarz
-    // Preconditioner. This preconditioner can be selected with the two
-    // follwoing lines:
-    // LinearAlgebra::TpetraWrappers::PreconditionFROSch<double> preconditioner;
-    // preconditioner.initialize(system_matrix);
+    optimized_schwarz_operator.initialize(system_matrix, Teuchos::sublist(parameter_list, "Preconditioner List"), false);
 
     solver.solve(system_matrix,
                  completely_distributed_solution,
                  system_rhs,
-                 preconditioner);
+                 optimized_schwarz_operator);
 
     pcout << "Solved in " << solver.num_iterations << std::endl;
 
@@ -520,37 +335,10 @@ namespace Step40
         else
           {
             refine_grid();
-            local_triangulation.clear();
-            optimized_schwarz_operator.reset();
           }
-
-        // compute the dual graph
-        optimized_schwarz_operator.export_crs(triangulation);
 
         setup_system();
         assemble_system();
-
-        optimized_schwarz_operator.initialize(system_matrix);
-
-        // create the overlapping partitioning
-        optimized_schwarz_operator.create_local_triangulation(
-          dof_handler,
-          triangulation,
-          local_triangulation,
-          1 /*robin_boundary*/,
-          mpi_communicator);
-
-        // First we need to set up and assemble the global system
-        // setup_system();
-        setup_local_system();
-
-        optimized_schwarz_operator.create_overlapping_map(local_dof_handler, dof_handler.n_dofs(), mpi_communicator);
-
-        assemble_local_system(alpha, beta);
-
-        optimized_schwarz_operator.compute(local_neumann_matrix,
-                                           local_robin_matrix);
-
 
         pcout << "   Number of active cells:       "
               << triangulation.n_global_active_cells() << std::endl
