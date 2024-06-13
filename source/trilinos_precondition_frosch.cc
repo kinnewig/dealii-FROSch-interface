@@ -122,7 +122,7 @@ FROSchOperator<dim, Number, MemorySpace>::extract_dof_index_list(
 {
   const size_t n_vectors      = mv->getNumVectors();
   const size_t local_length   = mv->getLocalLength();
-  const size_t faces_per_cell = GeometryInfo<2>::faces_per_cell;
+  const size_t faces_per_cell = GeometryInfo<dim>::faces_per_cell;
   const size_t dofs_per_cell  = n_vectors - (2 * faces_per_cell) - 2;
 
   dof_index_list.resize(local_length, std::vector<size_type>(dofs_per_cell));
