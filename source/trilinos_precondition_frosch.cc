@@ -55,13 +55,13 @@ compute_local_to_global_vertex_index_map(
   }
 
   //// TODO: Debugging:  print that map
-  //if (rank == 0)
-  //  for (unsigned int i = 0; i < n_ranks; ++i)
-  //    {
-  //      for (unsigned int j = 0; j < max_global_vertex_index; ++j)
-  //        std::cout << index_to_rank_map[i][j] << " ";
-  //      std::cout << std::endl;
-  //    }
+  // if (rank == 0)
+  //   for (unsigned int i = 0; i < n_ranks; ++i)
+  //     {
+  //       for (unsigned int j = 0; j < max_global_vertex_index; ++j)
+  //         std::cout << index_to_rank_map[i][j] << " ";
+  //       std::cout << std::endl;
+  //     }
 
 
   // ---------------------------------------------------------------------------
@@ -180,6 +180,96 @@ compute_local_to_global_vertex_index_map(
 
 
 
+// Unfortunately, the function
+// GridTools::compute_local_to_global_vertex_index_map() has a bug that causes
+// some indices to be missing on some ranks. This is a workaround to add missing
+// indices.
+// This function takes the local_to_global_vertex_index_map and a
+// std::vector<unsigned int> with the missing indices and adds the missing local
+// global pairs to the local_to_global map.
+void
+add_missing_global_vertex_indices(
+  std::map<unsigned int, types::global_vertex_index> &local_to_global,
+  const std::vector<unsigned int>                    &local_indices,
+  MPI_Comm                                            communicator)
+{
+  // get information about the current mpi process:
+  unsigned int n_ranks = Utilities::MPI::n_mpi_processes(communicator);
+  unsigned int rank    = Utilities::MPI::this_mpi_process(communicator);
+
+  // send an request of the missing local indices to all other ranks:
+  std::vector<std::vector<unsigned int>> gathered_local_indices =
+    Utilities::MPI::all_gather(communicator, local_indices);
+
+  // Store the awnser
+  std::map<unsigned int, std::vector<types::global_vertex_index>> awnser;
+
+  // check if this ranks owns any of the local indices that is missing on an
+  // other rank
+  for (unsigned int i = 0; i < n_ranks; ++i)
+    {
+      if (i != rank)
+        {
+          std::vector<types::global_vertex_index> awnser_vector(
+            gathered_local_indices[i].size());
+
+          bool found_awnser = false;
+          for (unsigned int j = 0; j < gathered_local_indices[i].size(); ++j)
+            {
+              try
+                {
+                  awnser_vector[j] =
+                    local_to_global.at(gathered_local_indices[i][j]);
+
+                  found_awnser = true;
+                }
+              catch (std::out_of_range &e)
+                {
+                  // the local index does not exist on the current rank
+                  awnser_vector[j] = 0;
+                }
+            }
+
+          if (found_awnser)
+            awnser[i] = awnser_vector;
+        }
+    }
+
+  // communicate the awnser:
+  std::map<unsigned int, std::vector<types::global_vertex_index>>
+    gathered_awnser = Utilities::MPI::some_to_some(communicator, awnser);
+
+
+  // Gather the local to global pairs, ranks with a lower index have
+  // a higher priority.
+  std::vector<types::global_vertex_index> global_indices(local_indices.size());
+  std::vector<types::global_vertex_index> tmp;
+  for (unsigned int i = n_ranks - 1; i > 0; --i)
+    {
+      if (i != rank)
+        try
+          {
+            tmp = gathered_awnser.at(i);
+          }
+        catch (std::out_of_range &e)
+          {
+            // the local index does not exist on the current rank
+            tmp = std::vector<types::global_vertex_index>();
+          }
+
+      if (tmp.size() == local_indices.size())
+        for (unsigned int j = 0; j < local_indices.size(); ++j)
+          if (tmp[j] != 0)
+            global_indices[j] = tmp[j];
+    }
+
+  // add the missing entries
+  for (unsigned int j = 0; j < local_indices.size(); ++j)
+    local_to_global[local_indices[j]] = global_indices[j];
+}
+
+
+
 template <int dim, typename Number, typename MemorySpace>
 FROSchOperator<dim, Number, MemorySpace>::FROSchOperator(
   Teuchos::RCP<Teuchos::ParameterList> parameter_list)
@@ -293,7 +383,7 @@ FROSchOperator<dim, Number, MemorySpace>::extract_dof_index_list(
 {
   const size_t n_vectors      = mv->getNumVectors();
   const size_t local_length   = mv->getLocalLength();
-  const size_t faces_per_cell = GeometryInfo<2>::faces_per_cell;
+  const size_t faces_per_cell = GeometryInfo<dim>::faces_per_cell;
   const size_t dofs_per_cell  = n_vectors - (2 * faces_per_cell) - 2;
 
   dof_index_list.resize(local_length, std::vector<size_type>(dofs_per_cell));
@@ -438,12 +528,33 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
     triangulation.n_locally_owned_active_cells() *
     GeometryInfo<dim>::vertices_per_cell);
 
-  long long vertex_counter = 0;
-  for (auto &cell : triangulation.cell_iterators())
-    {
-      if (!cell->is_active())
-        continue;
 
+  // BUG FIX!
+  // In some cases the local_to_global map is missing some entries.
+  {
+    // Identify the missing entries
+    std::vector<unsigned int> missing_entries;
+    for (auto &cell : dof_handler.active_cell_iterators())
+      {
+        if (!cell->is_locally_owned())
+          continue;
+
+        // loop over all verices
+        for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
+          if (local_to_global[cell->vertex_index(vertex_index)] == 0 &&
+              cell->vertex_index(vertex_index) != 0)
+            missing_entries.push_back(cell->vertex_index(vertex_index));
+      }
+
+    // Add the missing entries:
+    add_missing_global_vertex_indices(local_to_global,
+                                      missing_entries,
+                                      communicator);
+  }
+
+  long long vertex_counter = 0;
+  for (auto &cell : dof_handler.active_cell_iterators())
+    {
       if (!cell->is_locally_owned())
         continue;
 
@@ -649,12 +760,12 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
     }
 
   // just for debugging
-  //int rank;
-  //MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  // int rank;
+  // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   //
-  //std::string   name = "Grid-" + std::to_string(rank) + ".vtk";
-  //std::ofstream output_file(name);
-  //GridOut().write_vtk(local_triangulation, output_file);
+  // std::string   name = "Grid-" + std::to_string(rank) + ".vtk";
+  // std::ofstream output_file(name);
+  // GridOut().write_vtk(local_triangulation, output_file);
 }
 
 
