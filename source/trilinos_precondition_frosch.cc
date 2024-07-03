@@ -1,4 +1,6 @@
 #include <deal.II/base/geometry_info.h>
+#include <deal.II/base/mpi.h>
+#include <deal.II/base/types.h>
 
 #include <Teuchos_ParameterList.hpp>
 #include <Xpetra_CrsGraphFactory.hpp>
@@ -7,6 +9,176 @@
 #include <algorithm>
 
 DEAL_II_NAMESPACE_OPEN
+
+template <int dim>
+std::map<unsigned int, types::global_vertex_index>
+compute_local_to_global_vertex_index_map(
+  parallel::distributed::Triangulation<dim> &triangulation,
+  MPI_Comm                                   communicator)
+{
+  // Get the unsorted local to global map:
+  std::map<unsigned int, types::global_vertex_index> unsorted_local_to_global =
+    GridTools::compute_local_to_global_vertex_index_map(triangulation);
+
+  // Get the highest occuring global vertex index over all ranks
+  types::global_vertex_index max_global_vertex_index = 0;
+  for (const auto pair : unsorted_local_to_global)
+    if (pair.second > max_global_vertex_index)
+      max_global_vertex_index = pair.second;
+
+  // Communicate the maximum between the ranks:
+  max_global_vertex_index =
+    Utilities::MPI::max(max_global_vertex_index, communicator) + 1;
+
+
+  // ---------------------------------------------------------------------------
+  // Communicate between the ranks, which global index belongs to which rank:
+
+  // get information about the current mpi process:
+  unsigned int n_ranks = Utilities::MPI::n_mpi_processes(communicator);
+  unsigned int rank    = Utilities::MPI::this_mpi_process(communicator);
+
+  std::vector<std::vector<bool>> index_to_rank_map;
+  {
+    std::vector<bool> local_index_to_rank_map(max_global_vertex_index, false);
+
+    // go through all entries, and mark every entry that is owned
+    // by this rank
+    for (const auto pair : unsorted_local_to_global)
+      local_index_to_rank_map[pair.second] = true;
+
+    // gather all local index_to_rank_maps and
+    // combine them into one list, and boradcast that list
+    // to all other ranks
+    index_to_rank_map =
+      Utilities::MPI::all_gather(communicator, local_index_to_rank_map);
+  }
+
+  //// TODO: Debugging:  print that map
+  //if (rank == 0)
+  //  for (unsigned int i = 0; i < n_ranks; ++i)
+  //    {
+  //      for (unsigned int j = 0; j < max_global_vertex_index; ++j)
+  //        std::cout << index_to_rank_map[i][j] << " ";
+  //      std::cout << std::endl;
+  //    }
+
+
+  // ---------------------------------------------------------------------------
+  // Create the map to sort the unsorted map.
+
+  // count how many locally owned entries we have
+  // (we start by the complete number of local entries, and substract
+  //  all entries that do belong to a rank with an smaller rank index)
+  types::global_vertex_index n_locally_owmed = unsorted_local_to_global.size();
+  for (const auto pair : unsorted_local_to_global)
+    for (unsigned int j = 0; j < rank; ++j)
+      if (index_to_rank_map[j][pair.second])
+        {
+          --n_locally_owmed;
+          break;
+        }
+
+  // Create a list that contains all global indices that are owned by
+  // this rank:
+  std::vector<types::global_vertex_index> sorting_data(n_locally_owmed);
+  {
+    unsigned int i = 0;
+    for (const auto pair : unsorted_local_to_global)
+      {
+        // check if the global index belongs to an rank with an lower index
+        // number as well if it does, we skip the index for the moment and deal
+        // later with it.
+        bool belongs_to_other_rank = false;
+        for (unsigned int j = 0; j < rank; ++j)
+          if (index_to_rank_map[j][pair.second])
+            {
+              belongs_to_other_rank = true;
+              break;
+            }
+
+        if (!belongs_to_other_rank)
+          {
+            sorting_data[i] = pair.second;
+            ++i;
+          }
+      }
+  }
+
+  // Sort the list of global indices owned by this rank
+  std::sort(sorting_data.begin(), sorting_data.end());
+
+  // With the sorted list of locally owned global indices, we create the map, to
+  // sort the unsorted map.
+  // This is not as confusing as it may sound, we just  create a map, that takes
+  // the (unsorted) global index, that corresponds to the smalles local index
+  // and map it to the smallest global index owned by this rank.
+  //                           ... okay maybe it is a little bit confusing...
+  std::map<unsigned int, types::global_vertex_index> sorting_local_to_global;
+  {
+    unsigned int i = 0;
+    for (const auto pair : unsorted_local_to_global)
+      {
+        // check if the global index belongs to an rank with an lower index
+        // number as well if it does, we skip the index for the moment and deal
+        // later with it.
+        bool belongs_to_other_rank = false;
+        for (unsigned int j = 0; j < rank; ++j)
+          if (index_to_rank_map[j][pair.second])
+            {
+              belongs_to_other_rank = true;
+              break;
+            }
+
+        if (!belongs_to_other_rank)
+          {
+            sorting_local_to_global[pair.second] = sorting_data[i];
+            ++i;
+          }
+      }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Syncronise between ranks:
+  // TODO: this is a very simple approach that communicates way more than
+  // necessary
+
+  std::map<unsigned int, types::global_vertex_index> syncronise_map;
+  for (const auto pair : unsorted_local_to_global)
+    for (unsigned int i = rank + 1; i < n_ranks; ++i)
+      if (index_to_rank_map[i][pair.second])
+        syncronise_map[pair.second] = sorting_local_to_global[pair.second];
+
+  std::vector<std::map<unsigned int, types::global_vertex_index>>
+    gathered_syncronise_map =
+      Utilities::MPI::gather(communicator, syncronise_map);
+
+  if (rank == 0)
+    {
+      for (int i = n_ranks - 1; i >= 0; --i)
+        for (const auto pair : gathered_syncronise_map[i])
+          syncronise_map[pair.first] = pair.second;
+    }
+  syncronise_map = Utilities::MPI::broadcast(communicator, syncronise_map);
+
+  // Fill in the values from the other ranks
+  for (const auto pair : unsorted_local_to_global)
+    for (unsigned int i = 0; i < rank; ++i)
+      if (index_to_rank_map[i][pair.second])
+        {
+          sorting_local_to_global[pair.second] = syncronise_map[pair.second];
+          break;
+        }
+
+  // Finally we can create the sorted map
+  std::map<unsigned int, types::global_vertex_index> local_to_global;
+  for (const auto pair : unsorted_local_to_global)
+    local_to_global[pair.first] = sorting_local_to_global[pair.second];
+
+  return local_to_global;
+}
+
+
 
 template <int dim, typename Number, typename MemorySpace>
 FROSchOperator<dim, Number, MemorySpace>::FROSchOperator(
@@ -32,8 +204,7 @@ FROSchOperator<dim, Number, MemorySpace>::extract_point_list(
   const size_t n_vectors    = mv->getNumVectors();
   const size_t local_length = mv->getLocalLength();
 
-  std::vector<Point<dim>> vertices(GeometryInfo<dim>::vertices_per_cell *
-                                   local_length);
+  std::vector<Point<dim>> vertices(local_length);
   for (unsigned int i = 0; i < n_vectors; ++i)
     {
       auto data = mv->getData(i);
@@ -122,7 +293,7 @@ FROSchOperator<dim, Number, MemorySpace>::extract_dof_index_list(
 {
   const size_t n_vectors      = mv->getNumVectors();
   const size_t local_length   = mv->getLocalLength();
-  const size_t faces_per_cell = GeometryInfo<dim>::faces_per_cell;
+  const size_t faces_per_cell = GeometryInfo<2>::faces_per_cell;
   const size_t dofs_per_cell  = n_vectors - (2 * faces_per_cell) - 2;
 
   dof_index_list.resize(local_length, std::vector<size_type>(dofs_per_cell));
@@ -133,49 +304,6 @@ FROSchOperator<dim, Number, MemorySpace>::extract_dof_index_list(
       for (unsigned int j = 0; j < local_length; ++j)
         dof_index_list[j][i] = data[index_list[j]];
     }
-}
-
-
-
-template <int dim, typename Number, typename MemorySpace>
-void
-FROSchOperator<dim, Number, MemorySpace>::extract_overlapping_map(
-  Teuchos::RCP<XMultiVectorType<size_type>> mv,
-  const size_type                           global_size,
-  MPI_Comm                                  communicator)
-{
-  const size_t n_vectors      = mv->getNumVectors();
-  const size_t local_length   = mv->getLocalLength();
-  const size_t faces_per_cell = GeometryInfo<2>::faces_per_cell;
-  const size_t dofs_per_cell  = n_vectors - (2 * faces_per_cell) - 2;
-
-  Teuchos::Array<size_type> cell_dofs(local_length * dofs_per_cell);
-
-  int counter = 0;
-  for (unsigned int i = 0; i < dofs_per_cell; ++i)
-    {
-      auto data = mv->getData((2 * faces_per_cell) + i);
-
-      for (unsigned int j = 0; j < local_length; ++j)
-        {
-          cell_dofs[counter] = data[j];
-          ++counter;
-        }
-    }
-
-  FROSch::sortunique(cell_dofs);
-
-  overlapping_map = Teuchos::rcp(new XTpetraMapType(
-    global_size,
-    cell_dofs,
-    0,
-    Utilities::Trilinos::internal::make_rcp<Teuchos::MpiComm<int>>(
-      communicator)));
-
-  // overlapping_map = FROSch::SortMapByGlobalIndex(overlapping_map);
-
-  // auto out = Teuchos::getFancyOStream (Teuchos::rcpFromRef (std::cout));
-  // overlapping_map->describe(*out, Teuchos::VERB_EXTREME);
 }
 
 
@@ -295,7 +423,7 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   // ------------------------------------------------------------------------------------------
   // Get the local to global map:
   std::map<unsigned int, types::global_vertex_index> local_to_global =
-    GridTools::compute_local_to_global_vertex_index_map(triangulation);
+    compute_local_to_global_vertex_index_map(triangulation, communicator);
 
   // IndexSet locally_relevant_dofs =
   // DoFTools::extract_locally_relevant_dofs(dof_handler);
@@ -447,15 +575,6 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
       for (unsigned int i = 0; i < dofs_per_cell; ++i)
         auxillary_vector_data[(2 * faces_per_cell) + i][cell_counter] =
           local_dof_indices[i];
-      //(size_type)uniqueMap->getGlobalElement(local_dof_indices[i]);
-
-      // int rank;
-      // MPI_Comm_rank(communicator, &rank);
-      // if (rank == 1)
-      //   for (unsigned int i = 0; i < dofs_per_cell; ++i)
-      //     std::cout << local_dof_indices[i] << ": "
-      //     <<(size_type)uniqueMap->getGlobalElement(local_dof_indices[i]) <<
-      //     std::endl;
 
       // Add information about the system to the auxiallary list:
       auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 0]
@@ -490,7 +609,6 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   // read in the auxillary_data
   extract_index_list(auxillary_vector);
   extract_dof_index_list(auxillary_vector);
-  //extract_overlapping_map(auxillary_vector, dof_handler.n_dofs(), communicator);
 
   // cast back: SubCellData
   std::vector<std::vector<int>> sub_cell_data =
@@ -509,7 +627,8 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   cell_counter = 0;
   for (auto &cell : local_triangulation.cell_iterators())
     {
-      cell->set_material_id(sub_cell_data[cell_counter][2 * faces_per_cell]);
+      cell->set_material_id(
+        sub_cell_data[cell_counter][(2 * faces_per_cell) + dofs_per_cell]);
 
       if (cell->at_boundary())
         for (unsigned int face = 0; face < faces_per_cell; face++)
@@ -530,22 +649,12 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
     }
 
   // just for debugging
-  // int rank;
-  // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-  // std::string name = "Grid-" + std::to_string(rank) + ".vtk";
-  // std::ofstream output_file(name);
-  // GridOut().write_vtk(local_triangulation, output_file);
-
-  // Once the overlapping_map is copmuted, we can initialize the
-  // OptimizedFROSchOperator.
-
-
-  // Two Level Operator
-  // optimized_schwarz->initialize(
-  //  dim,              /*dimension*/
-  //  1,                /*dofs per node*/
-  //  Teuchos::rcp_const_cast<XMapType>(overlapping_map));
+  //int rank;
+  //MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  //
+  //std::string   name = "Grid-" + std::to_string(rank) + ".vtk";
+  //std::ofstream output_file(name);
+  //GridOut().write_vtk(local_triangulation, output_file);
 }
 
 
@@ -557,7 +666,8 @@ FROSchOperator<dim, Number, MemorySpace>::create_overlapping_map(
   unsigned int     global_size,
   MPI_Comm         communicator)
 {
-  const unsigned int dofs_per_cell = local_dof_handler.get_fe().n_dofs_per_cell();
+  const unsigned int dofs_per_cell =
+    local_dof_handler.get_fe().n_dofs_per_cell();
 
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell, -1);
 
@@ -568,7 +678,7 @@ FROSchOperator<dim, Number, MemorySpace>::create_overlapping_map(
     {
       cell->get_dof_indices(local_dof_indices);
 
-      for(unsigned int i = 0; i < dofs_per_cell; ++i)
+      for (unsigned int i = 0; i < dofs_per_cell; ++i)
         array[local_dof_indices[i]] = dof_index_list[cell_counter][i];
 
       ++cell_counter;
