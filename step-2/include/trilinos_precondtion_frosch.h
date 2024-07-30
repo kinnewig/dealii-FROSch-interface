@@ -306,6 +306,7 @@ private:
 
 // instantiation
 template class OptimizedFROSchPreconditioner<2, double>;
+template class OptimizedFROSchPreconditioner<3, double>;
 
 
 DEAL_II_NAMESPACE_CLOSE

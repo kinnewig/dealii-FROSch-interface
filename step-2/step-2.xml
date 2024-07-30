@@ -1,15 +1,23 @@
 <ParameterList name="Step-2">
-    <ParameterList name="Preconditioner List">
-        <Parameter name="OverlappingOperator Type"         type="string" value="OptimizedOperator"/>
-        <Parameter name="Dimension"                        type="int"    value="2"/>
-        <Parameter name="Overlap"                          type="int"    value="3"/>
-        <ParameterList name="AlgebraicOverlappingOperator">
-            <Parameter name="Combine Values in Overlap"    type="string" value="Restricted"/>
-            <ParameterList name="Solver">
-                <Parameter name="SolverType"               type="string" value="Amesos2"/>
-                <Parameter name="Solver"                   type="string" value="KLU"/>
-            </ParameterList>
-        </ParameterList>
+  <ParameterList name="Preconditioner List">
+    <Parameter name="OverlappingOperator Type"          type="string" value="GeometricOverlappingOperator"/>
+    <Parameter name="Dimension"                         type="int"    value="2"/>
+    <Parameter name="Overlap"                           type="int"    value="3"/>
+    <Parameter name="Alpha"                             type="double" value="1.0"/>
+    <ParameterList name="GeometricOverlappingOperator">
+      <Parameter name="Combine Values in Overlap"       type="string" value="Restricted"/>
+      <ParameterList name="Solver">
+        <Parameter name="SolverType"                    type="string" value="Amesos2"/>
+        <Parameter name="Solver"                        type="string" value="KLU"/>
       </ParameterList>
+    </ParameterList>
+  </ParameterList>
+  <ParameterList name="Mesh and Geometry">
+      <Parameter name="Number of refinements"           type="int"    value="5"/>
+      <Parameter name="Polynomial degree"               type="int"    value="1"/>
+  </ParameterList>
+  <ParameterList name="Output Parameters">
+      <Parameter name="Output File"                     type="string" value="solution"/>
+  </ParameterList>
 </ParameterList>
 

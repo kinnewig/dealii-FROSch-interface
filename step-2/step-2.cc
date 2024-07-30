@@ -59,6 +59,7 @@
 
 // Optimized Schwarz Preconditioner
 #include <trilinos_precondtion_frosch.h>
+#include <parameter_reader.h>
 
 #include <iostream>
 #include <string>
@@ -71,36 +72,42 @@ namespace Step2
   class LaplaceProblem
   {
   public:
-    LaplaceProblem();
+    LaplaceProblem(std::string xml_file, MPI_Comm mpi_comm);
 
     void
-    run(unsigned int refinements, double alpha, double beta);
+    run();
 
   private:
     void
     setup_system();
+
     void
     assemble_system();
+
     void
     solve();
+
     void
-    refine_grid();
-    void
-    output_results(const unsigned int cycle) const;
+    output_results() const;
 
     // --------------------------------------------------------
     // additional functions
     void
-    assemble_local_system(double alpha, double beta);
+    assemble_local_system(double alpha);
+
     void
     setup_local_system();
 
     // === Member ===
+    // Parameter Reader 
+    ParameterReader prm;
+
+    // MPI communicator
     MPI_Comm mpi_communicator;
 
+    // Locall problem
     AffineConstraints<double> local_constraints;
 
-    // Locally problem
     Triangulation<dim>                                               local_triangulation;
     DoFHandler<dim>                                                  local_dof_handler;
     LinearAlgebra::TpetraWrappers::SparseMatrix<double>              local_neumann_matrix;
@@ -133,15 +140,18 @@ namespace Step2
 
 
   template <int dim>
-  LaplaceProblem<dim>::LaplaceProblem()
-    : mpi_communicator(MPI_COMM_WORLD)
+  LaplaceProblem<dim>::LaplaceProblem(
+      std::string xml_file, 
+      MPI_Comm mpi_comm)
+    : prm(xml_file)
+    , mpi_communicator(mpi_comm)
     , local_dof_handler(local_triangulation)
-    , optimized_schwarz_operator("step-2.xml")
+    , optimized_schwarz_operator(xml_file)
     , triangulation(mpi_communicator,
                     typename Triangulation<dim>::MeshSmoothing(
                       Triangulation<dim>::smoothing_on_refinement |
                       Triangulation<dim>::smoothing_on_coarsening))
-    , fe(1)
+    , fe(prm.get_integer("Mesh and Geometry", "Polynomial degree"))
     , dof_handler(triangulation)
     , pcout(std::cout,
             (Utilities::MPI::this_mpi_process(mpi_communicator) == 0))
@@ -315,7 +325,7 @@ namespace Step2
 
   template <int dim>
   void
-  LaplaceProblem<dim>::assemble_local_system(double alpha, double beta)
+  LaplaceProblem<dim>::assemble_local_system(double alpha)
   {
     const QGauss<dim>     quadrature_formula(fe.degree + 1);
     const QGauss<dim - 1> quadrature_face_formula(fe.degree);
@@ -339,9 +349,6 @@ namespace Step2
     FullMatrix<double> cell_neumann_matrix(dofs_per_cell, dofs_per_cell);
     FullMatrix<double> cell_robin_matrix(dofs_per_cell, dofs_per_cell);
     Vector<double>     cell_rhs(dofs_per_cell);
-
-    //const double alpha =  0.0853 * std::sqrt(2 * numbers::PI);
-    //const double beta  =  - 0.0128 * std::sqrt(2 * numbers::PI);
 
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
     unsigned int                         cell_counter = 0;
@@ -387,12 +394,9 @@ namespace Step2
                     for (const unsigned int j : fe_face_values.dof_indices())
                       {
                         cell_robin_matrix(i, j) +=
-                          ((alpha *
-                            fe_face_values.shape_value(i, q_face_point) *
-                            fe_face_values.shape_value(j, q_face_point)) +
-                           (beta * fe_face_values.shape_grad(i, q_face_point) *
-                            beta * fe_face_values.shape_grad(j, q_face_point)
-                            )) *
+                          alpha *
+                          fe_face_values.shape_value(i, q_face_point) *
+                          fe_face_values.shape_value(j, q_face_point) *
                           fe_face_values.JxW(q_face_point);
                       }
                   }
@@ -404,9 +408,6 @@ namespace Step2
         for (unsigned int i = 0; i < dofs_per_cell; ++i)
           for (unsigned int j = 0; j < dofs_per_cell; ++j)
             {
-              //local_neumann_matrix.add(local_dof_indices[i],
-              //                         local_dof_indices[j],
-              //                         cell_neumann_matrix(i, j));
               local_robin_matrix.add(local_dof_indices[i],
                                      local_dof_indices[j],
                                      cell_robin_matrix(i, j));
@@ -431,21 +432,12 @@ namespace Step2
     LinearAlgebra::TpetraWrappers::Vector<double>
       completely_distributed_solution(locally_owned_dofs, mpi_communicator);
 
-    Teuchos::RCP<Teuchos::ParameterList> parameter_list =
-      Teuchos::parameterList();
-
     SolverControl solver_control(dof_handler.n_dofs(), 1e-12);
 
     SolverGMRES<LinearAlgebra::TpetraWrappers::Vector<double, MemorySpace::Host>> solver(solver_control);
 
     LinearAlgebra::TpetraWrappers::PreconditionGeometricFROSch<double> preconditioner("one_level");
     preconditioner.initialize(optimized_schwarz_operator.get_precondioner());
-
-    // As a refernece it is intresting to use the default (Algebraic) Schwarz
-    // Preconditioner. This preconditioner can be selected with the two
-    // follwoing lines:
-    // LinearAlgebra::TpetraWrappers::PreconditionFROSch<double> preconditioner;
-    // preconditioner.initialize(system_matrix);
 
     solver.solve(system_matrix,
                  completely_distributed_solution,
@@ -462,27 +454,7 @@ namespace Step2
 
   template <int dim>
   void
-  LaplaceProblem<dim>::refine_grid()
-  {
-    TimerOutput::Scope t(computing_timer, "refine");
-
-    Vector<float> estimated_error_per_cell(triangulation.n_active_cells());
-    KellyErrorEstimator<dim>::estimate(
-      dof_handler,
-      QGauss<dim - 1>(fe.degree + 1),
-      std::map<types::boundary_id, const Function<dim> *>(),
-      locally_relevant_solution,
-      estimated_error_per_cell);
-    parallel::distributed::GridRefinement::refine_and_coarsen_fixed_number(
-      triangulation, estimated_error_per_cell, 0.3, 0.03);
-    triangulation.execute_coarsening_and_refinement();
-  }
-
-
-
-  template <int dim>
-  void
-  LaplaceProblem<dim>::output_results(const unsigned int cycle) const
+  LaplaceProblem<dim>::output_results() const
   {
     DataOut<dim> data_out;
     data_out.attach_dof_handler(dof_handler);
@@ -495,79 +467,71 @@ namespace Step2
 
     data_out.build_patches();
 
+    std::string out_name = prm.get_string("Output Parameters", "Output File");
+
     data_out.write_vtu_with_pvtu_record(
-      "./", "solution", cycle, mpi_communicator, 2, 8);
+      "./", out_name, 0, mpi_communicator, 2, 8);
   }
 
 
 
   template <int dim>
   void
-  LaplaceProblem<dim>::run(unsigned int refinements, double alpha, double beta)
+  LaplaceProblem<dim>::run()
   {
-    const unsigned int n_cycles = 1;
-    for (unsigned int cycle = 0; cycle < n_cycles; ++cycle)
-      {
-        pcout << "Cycle " << cycle << ':' << std::endl;
+    // create the grid
+    GridGenerator::hyper_cube(triangulation);
+
+    const unsigned int refinements = 
+      prm.get_integer("Mesh and Geometry", "Number of refinements");
+    triangulation.refine_global(refinements);
+
+    // compute the dual graph
+    optimized_schwarz_operator.export_crs(triangulation);
+
+    setup_system();
+    assemble_system();
+
+    optimized_schwarz_operator.initialize(system_matrix);
+
+    // create the overlapping partitioning
+    optimized_schwarz_operator.create_local_triangulation(
+      dof_handler,
+      triangulation,
+      local_triangulation,
+      1 /*robin_boundary*/,
+      mpi_communicator);
+
+    // First we need to set up and assemble the global system
+    // setup_system();
+    setup_local_system();
+
+    optimized_schwarz_operator.create_overlapping_map(local_dof_handler, dof_handler.n_dofs(), mpi_communicator);
+
+    double alpha =
+      prm.get_double("Preconditioner List", "Alpha");
+    assemble_local_system(alpha);
+
+    optimized_schwarz_operator.compute(local_neumann_matrix,
+                                       local_robin_matrix);
 
 
-        if (cycle == 0)
-          {
-            GridGenerator::hyper_cube(triangulation);
-            triangulation.refine_global(refinements);
-          }
-        else
-          {
-            refine_grid();
-            local_triangulation.clear();
-            optimized_schwarz_operator.reset();
-          }
+    pcout << "   Number of active cells:       "
+          << triangulation.n_global_active_cells() << std::endl
+          << "   Number of degrees of freedom: " << dof_handler.n_dofs()
+          << std::endl;
 
-        // compute the dual graph
-        optimized_schwarz_operator.export_crs(triangulation);
+    solve();
 
-        setup_system();
-        assemble_system();
+    {
+      TimerOutput::Scope t(computing_timer, "output");
+      output_results();
+    }
 
-        optimized_schwarz_operator.initialize(system_matrix);
+    computing_timer.print_summary();
+    computing_timer.reset();
 
-        // create the overlapping partitioning
-        optimized_schwarz_operator.create_local_triangulation(
-          dof_handler,
-          triangulation,
-          local_triangulation,
-          1 /*robin_boundary*/,
-          mpi_communicator);
-
-        // First we need to set up and assemble the global system
-        // setup_system();
-        setup_local_system();
-
-        optimized_schwarz_operator.create_overlapping_map(local_dof_handler, dof_handler.n_dofs(), mpi_communicator);
-
-        assemble_local_system(alpha, beta);
-
-        optimized_schwarz_operator.compute(local_neumann_matrix,
-                                           local_robin_matrix);
-
-
-        pcout << "   Number of active cells:       "
-              << triangulation.n_global_active_cells() << std::endl
-              << "   Number of degrees of freedom: " << dof_handler.n_dofs()
-              << std::endl;
-
-        solve();
-
-        {
-          TimerOutput::Scope t(computing_timer, "output");
-          output_results(cycle);
-        }
-
-        computing_timer.print_summary();
-        computing_timer.reset();
-
-        pcout << std::endl;
-      }
+    pcout << std::endl;
   }
 } // namespace Step2
 
@@ -583,25 +547,36 @@ main(int argc, char *argv[])
 
       Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
 
-      LaplaceProblem<2> laplace_problem_2d;
+      // Read in dimension from the option file:
+      unsigned int dim;
+      {
+        ParameterReader prm("step-2.xml");
+        dim = prm.get_integer("Preconditioner List", "Dimension");
+      }
 
-      unsigned int refinements;
-      double alpha, beta;
-      if (argc == 4)
+      switch (dim)
         {
-          refinements = std::stoi(argv[1]);
-          alpha       = std::stod(argv[2]);
-          beta        = std::stod(argv[3]);
-        }
-      else
-        {
-          refinements = 5;
-          alpha       = 1.0;
-          beta        = 0.0;
+          case 2:
+            {
+              LaplaceProblem<2> laplace_problem("step-2.xml", MPI_COMM_WORLD);
+              laplace_problem.run();
+
+              break;
+            }
+          case 3:
+            {
+              LaplaceProblem<3> laplace_problem("step-2.xml", MPI_COMM_WORLD);
+              laplace_problem.run();
+
+              break;
+            }
+          default:
+            {
+              Assert(false, ExcNotImplemented());
+              break;
+            }
         }
 
-
-      laplace_problem_2d.run(refinements, alpha, beta);
     }
   catch (std::exception &exc)
     {
