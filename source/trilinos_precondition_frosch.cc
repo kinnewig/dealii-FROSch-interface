@@ -271,7 +271,7 @@ add_missing_global_vertex_indices(
 
 
 template <int dim, typename Number, typename MemorySpace>
-FROSchOperator<dim, Number, MemorySpace>::FROSchOperator(
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::OptimizedFROSchPreconditioner(
   Teuchos::RCP<Teuchos::ParameterList> parameter_list)
   : parameter_list(parameter_list)
 {}
@@ -279,7 +279,7 @@ FROSchOperator<dim, Number, MemorySpace>::FROSchOperator(
 
 
 template <int dim, typename Number, typename MemorySpace>
-FROSchOperator<dim, Number, MemorySpace>::FROSchOperator(std::string xml_file)
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::OptimizedFROSchPreconditioner(std::string xml_file)
   : parameter_list(Teuchos::sublist(FROSch::getParametersFromXmlFile(xml_file),
                                     "Preconditioner List"))
 {}
@@ -288,8 +288,8 @@ FROSchOperator<dim, Number, MemorySpace>::FROSchOperator(std::string xml_file)
 
 template <int dim, typename Number, typename MemorySpace>
 std::vector<Point<dim>>
-FROSchOperator<dim, Number, MemorySpace>::extract_point_list(
-  Teuchos::RCP<XMultiVectorType<double>> mv)
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::extract_point_list(
+  Teuchos::RCP<LA::XpetraTypes::MultiVectorType<Number, MemorySpace>> mv)
 {
   const size_t n_vectors    = mv->getNumVectors();
   const size_t local_length = mv->getLocalLength();
@@ -310,8 +310,8 @@ FROSchOperator<dim, Number, MemorySpace>::extract_point_list(
 
 template <int dim, typename Number, typename MemorySpace>
 std::vector<CellData<dim>>
-FROSchOperator<dim, Number, MemorySpace>::extract_cell_list(
-  Teuchos::RCP<XMultiVectorType<size_type>> mv)
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::extract_cell_list(
+  Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> mv)
 {
   const size_t n_vectors    = GeometryInfo<dim>::vertices_per_cell;
   const size_t local_length = mv->getLocalLength();
@@ -332,8 +332,8 @@ FROSchOperator<dim, Number, MemorySpace>::extract_cell_list(
 
 template <int dim, typename Number, typename MemorySpace>
 std::vector<std::vector<int>>
-FROSchOperator<dim, Number, MemorySpace>::extract_auxillary_list(
-  Teuchos::RCP<XMultiVectorType<size_type>> mv)
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::extract_auxillary_list(
+  Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> mv)
 {
   const size_t n_vectors    = mv->getNumVectors();
   const size_t local_length = mv->getLocalLength();
@@ -354,8 +354,8 @@ FROSchOperator<dim, Number, MemorySpace>::extract_auxillary_list(
 
 template <int dim, typename Number, typename MemorySpace>
 void
-FROSchOperator<dim, Number, MemorySpace>::extract_index_list(
-  Teuchos::RCP<XMultiVectorType<size_type>> mv)
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::extract_index_list(
+  Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> mv)
 {
   const size_t n_vectors    = mv->getNumVectors();
   const size_t local_length = mv->getLocalLength();
@@ -378,15 +378,15 @@ FROSchOperator<dim, Number, MemorySpace>::extract_index_list(
 
 template <int dim, typename Number, typename MemorySpace>
 void
-FROSchOperator<dim, Number, MemorySpace>::extract_dof_index_list(
-  Teuchos::RCP<XMultiVectorType<size_type>> mv)
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::extract_dof_index_list(
+  Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> mv)
 {
   const size_t n_vectors      = mv->getNumVectors();
   const size_t local_length   = mv->getLocalLength();
   const size_t faces_per_cell = GeometryInfo<dim>::faces_per_cell;
   const size_t dofs_per_cell  = n_vectors - (2 * faces_per_cell) - 2;
 
-  dof_index_list.resize(local_length, std::vector<size_type>(dofs_per_cell));
+  dof_index_list.resize(local_length, std::vector<GO>(dofs_per_cell));
   for (unsigned int i = 0; i < dofs_per_cell; ++i)
     {
       auto data = mv->getData((2 * faces_per_cell) + i);
@@ -400,7 +400,7 @@ FROSchOperator<dim, Number, MemorySpace>::extract_dof_index_list(
 
 template <int dim, typename Number, typename MemorySpace>
 void
-FROSchOperator<dim, Number, MemorySpace>::export_crs(
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::export_crs(
   const parallel::distributed::Triangulation<dim> &triangulation)
 {
   // First we need to get the partitioning of the triangulation
@@ -412,10 +412,9 @@ FROSchOperator<dim, Number, MemorySpace>::export_crs(
   unsigned int max_neighbors = 2 * 4; // triangulation.max_adjacent_cells();
 
   // Create the CrsGraph
-  Teuchos::RCP<XMapType> locally_owned_set_map =
-    Teuchos::rcp(new XTpetraMapType(locally_owned_set.make_tpetra_map_rcp()));
-  dual_graph = Xpetra::CrsGraphFactory<int, size_type, NodeType>::Build(
-    locally_owned_set_map, max_neighbors);
+  Teuchos::RCP<LA::XpetraTypes::MapType<MemorySpace>> locally_owned_set_map =
+    Teuchos::rcp(new LA::XpetraTypes::TpetraMapType<MemorySpace>(locally_owned_set.make_tpetra_map_rcp()));
+  dual_graph = LA::XpetraTypes::GraphFactoryType<MemorySpace>::Build(locally_owned_set_map, max_neighbors);
 
   for (auto &cell : triangulation.cell_iterators())
     {
@@ -428,9 +427,8 @@ FROSchOperator<dim, Number, MemorySpace>::export_crs(
         continue;
 
       // store all neighbors
-      types::signed_global_dof_index current_cell_index =
-        cell->global_active_cell_index();
-      Teuchos::Array<types::signed_global_dof_index> neighbors;
+      GO current_cell_index = cell->global_active_cell_index();
+      Teuchos::Array<GO> neighbors;
 
       for (unsigned int face = 0; face < GeometryInfo<dim>::faces_per_cell;
            ++face)
@@ -480,17 +478,16 @@ FROSchOperator<dim, Number, MemorySpace>::export_crs(
 
 template <int dim, typename Number, typename MemorySpace>
 void
-FROSchOperator<dim, Number, MemorySpace>::initialize(
-  LinearAlgebra::TpetraWrappers::SparseMatrix<Number, MemorySpace> &matrix)
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::initialize(LA::SparseMatrix<Number, MemorySpace> &matrix)
 {
   // Initialize FROSch
-  Teuchos::RCP<XCrsMatrixType> x_system_crs_matrix =
-    Teuchos::rcp(new XTpetraCrsMatrixType(matrix.trilinos_rcp()));
-  Teuchos::RCP<XMatrixType> x_system_matrix =
-    Teuchos::rcp(new XCrsMatrixWrapType(x_system_crs_matrix));
+  Teuchos::RCP<LA::XpetraTypes::CrsMatrixType<Number, MemorySpace>> x_system_crs_matrix =
+    Teuchos::rcp(new LA::XpetraTypes::TpetraCrsMatrixType<Number, MemorySpace>(matrix.trilinos_rcp()));
+  Teuchos::RCP<LA::XpetraTypes::MatrixType<Number, MemorySpace>> x_system_matrix =
+    Teuchos::rcp(new LA::XpetraTypes::CrsMatrixWrapType<Number, MemorySpace>(x_system_crs_matrix));
 
   // One Level Operator:
-  optimized_schwarz = Teuchos::rcp(new FROSch::OneLevelOptimizedPreconditioner(
+  optimized_schwarz = Teuchos::rcp(new LA::XpetraTypes::FROSchGeometricOneLevelType<Number, MemorySpace>(
     x_system_matrix.getConst(), dual_graph, parameter_list));
 
   // Two Level Operator:
@@ -503,7 +500,7 @@ FROSchOperator<dim, Number, MemorySpace>::initialize(
 
 template <int dim, typename Number, typename MemorySpace>
 void
-FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::create_local_triangulation(
   DoFHandler<dim>                           &dof_handler,
   parallel::distributed::Triangulation<dim> &triangulation,
   Triangulation<dim>                        &local_triangulation,
@@ -517,7 +514,7 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
 
   // IndexSet locally_relevant_dofs =
   // DoFTools::extract_locally_relevant_dofs(dof_handler);
-  Teuchos::RCP<XMapType> uniqueMap = Teuchos::rcp(new XTpetraMapType(
+  Teuchos::RCP<LA::XpetraTypes::MapType<MemorySpace>> uniqueMap = Teuchos::rcp(new LA::XpetraTypes::TpetraMapType<MemorySpace>(
     dof_handler.locally_owned_dofs().make_tpetra_map_rcp(communicator, true)));
 
   // auto out = Teuchos::getFancyOStream (Teuchos::rcpFromRef (std::cout));
@@ -568,15 +565,15 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
     }
   FROSch::sortunique(vertex_array);
 
-  Teuchos::RCP<XMapType> x_local_to_global_map =
-    Xpetra::MapFactory<int, size_type, NodeType>::Build(
+  Teuchos::RCP<LA::XpetraTypes::MapType<MemorySpace>> x_local_to_global_map =
+    LA::XpetraTypes::MapFactoryType<MemorySpace>::Build(
       Xpetra::UseTpetra,
-      (size_type)triangulation.n_vertices(),
+      (GO)triangulation.n_vertices(),
       vertex_array(),
       0,
       dual_graph->getMap()->getComm());
 
-  Teuchos::RCP<const XMapType> x_map = dual_graph->getMap();
+  Teuchos::RCP<const LA::XpetraTypes::MapType<MemorySpace>> x_map = dual_graph->getMap();
 
 
   // ------------------------------------------------------------------------------------------
@@ -590,8 +587,8 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
 
   // Node Data
   //   Stores a list of vertices present in the triangulation.
-  Teuchos::RCP<XMultiVectorType<double>> nodes_vector =
-    XMultiVectorFactory<double>::Build(x_local_to_global_map, dim);
+  Teuchos::RCP<LA::XpetraTypes::MultiVectorType<Number, MemorySpace>> nodes_vector =
+    LA::XpetraTypes::MultiVectorFactoryType<Number, MemorySpace>::Build(x_local_to_global_map, dim);
 
   // Create an Array, such we can access its data
   Teuchos::Array<Teuchos::ArrayRCP<double>> nodes_vector_data(dim);
@@ -602,11 +599,11 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   // CellData
   //   Store a description of each cell present in the triangulation.
   //   Each cell is described by it's vertices.
-  Teuchos::RCP<XMultiVectorType<size_type>> cell_vector =
-    XMultiVectorFactory<size_type>::Build(x_map, vertices_per_cell);
+  Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> cell_vector =
+    LA::XpetraTypes::MultiVectorFactoryType<GO, MemorySpace>::Build(x_map, vertices_per_cell);
 
   // Create an Array, such we can access its data
-  Teuchos::Array<Teuchos::ArrayRCP<size_type>> cell_vector_data(
+  Teuchos::Array<Teuchos::ArrayRCP<GO>> cell_vector_data(
     (2 * faces_per_cell) + dofs_per_cell + 2);
   for (unsigned int i = 0; i < (2 * faces_per_cell) + dofs_per_cell + 2; ++i)
     cell_vector_data[i] = cell_vector->getDataNonConst(i);
@@ -632,13 +629,13 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   //   ------------------------+-------------------------------------------
   //   {(2 * faces_per_cell)   | Global active cell index
   //     + dofs_per_cell + 1}  |
-  Teuchos::RCP<XMultiVectorType<size_type>> auxillary_vector =
-    XMultiVectorFactory<size_type>::Build(x_map,
+  Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> auxillary_vector =
+    LA::XpetraTypes::MultiVectorFactoryType<GO, MemorySpace>::Build(x_map,
                                           (2 * faces_per_cell) + dofs_per_cell +
                                             2);
 
   // Create an Array, such we can access its data
-  Teuchos::Array<Teuchos::ArrayRCP<size_type>> auxillary_vector_data(
+  Teuchos::Array<Teuchos::ArrayRCP<GO>> auxillary_vector_data(
     (2 * faces_per_cell) + dofs_per_cell + 2);
   for (unsigned int i = 0; i < (2 * faces_per_cell) + dofs_per_cell + 2; ++i)
     auxillary_vector_data[i] = auxillary_vector->getDataNonConst(i);
@@ -653,7 +650,7 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
   // Vector to store the local DoF indices
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
-  size_type cell_counter = 0;
+  GO cell_counter = 0;
   for (auto &cell : dof_handler.active_cell_iterators())
     {
       if (!cell->is_locally_owned())
@@ -772,7 +769,7 @@ FROSchOperator<dim, Number, MemorySpace>::create_local_triangulation(
 
 template <int dim, typename Number, typename MemorySpace>
 void
-FROSchOperator<dim, Number, MemorySpace>::create_overlapping_map(
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::create_overlapping_map(
   DoFHandler<dim> &local_dof_handler,
   unsigned int     global_size,
   MPI_Comm         communicator)
@@ -782,7 +779,7 @@ FROSchOperator<dim, Number, MemorySpace>::create_overlapping_map(
 
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell, -1);
 
-  Teuchos::Array<size_type> array(local_dof_handler.n_locally_owned_dofs());
+  Teuchos::Array<GO> array(local_dof_handler.n_locally_owned_dofs());
 
   unsigned int cell_counter = 0;
   for (auto &cell : local_dof_handler.active_cell_iterators())
@@ -795,7 +792,7 @@ FROSchOperator<dim, Number, MemorySpace>::create_overlapping_map(
       ++cell_counter;
     }
 
-  overlapping_map = Teuchos::rcp(new XTpetraMapType(
+  overlapping_map = Teuchos::rcp(new LA::XpetraTypes::TpetraMapType<MemorySpace>(
     global_size,
     array,
     0,
@@ -804,28 +801,28 @@ FROSchOperator<dim, Number, MemorySpace>::create_overlapping_map(
 
   // One Level Operator
   optimized_schwarz->initialize(
-    Teuchos::rcp_const_cast<XMapType>(overlapping_map));
+    Teuchos::rcp_const_cast<LA::XpetraTypes::MapType<MemorySpace>>(overlapping_map));
 }
 
 
 
 template <int dim, typename Number, typename MemorySpace>
 void
-FROSchOperator<dim, Number, MemorySpace>::compute(
-  LinearAlgebra::TpetraWrappers::SparseMatrix<Number, MemorySpace>
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::compute(
+  LA::SparseMatrix<Number, MemorySpace>
     &local_neumann_matrix,
-  LinearAlgebra::TpetraWrappers::SparseMatrix<Number, MemorySpace>
+  LA::SparseMatrix<Number, MemorySpace>
     &local_robin_matrix)
 {
-  Teuchos::RCP<XCrsMatrixType> x_neumann_crs_matrix =
-    Teuchos::rcp(new XTpetraCrsMatrixType(local_neumann_matrix.trilinos_rcp()));
-  Teuchos::RCP<XMatrixType> x_neumann_matrix =
-    Teuchos::rcp(new XCrsMatrixWrapType(x_neumann_crs_matrix));
+  Teuchos::RCP<LA::XpetraTypes::CrsMatrixType<Number, MemorySpace>> x_neumann_crs_matrix =
+    Teuchos::rcp(new LA::XpetraTypes::TpetraCrsMatrixType<Number, MemorySpace>(local_neumann_matrix.trilinos_rcp()));
+  Teuchos::RCP<LA::XpetraTypes::MatrixType<Number, MemorySpace>> x_neumann_matrix =
+    Teuchos::rcp(new LA::XpetraTypes::CrsMatrixWrapType<Number, MemorySpace>(x_neumann_crs_matrix));
 
-  Teuchos::RCP<XCrsMatrixType> x_robin_crs_matrix =
-    Teuchos::rcp(new XTpetraCrsMatrixType(local_robin_matrix.trilinos_rcp()));
-  Teuchos::RCP<XMatrixType> x_robin_matrix =
-    Teuchos::rcp(new XCrsMatrixWrapType(x_robin_crs_matrix));
+  Teuchos::RCP<LA::XpetraTypes::CrsMatrixType<Number, MemorySpace>> x_robin_crs_matrix =
+    Teuchos::rcp(new LA::XpetraTypes::TpetraCrsMatrixType<Number, MemorySpace>(local_robin_matrix.trilinos_rcp()));
+  Teuchos::RCP<LA::XpetraTypes::MatrixType<Number, MemorySpace>> x_robin_matrix =
+    Teuchos::rcp(new LA::XpetraTypes::CrsMatrixWrapType<Number, MemorySpace>(x_robin_crs_matrix));
 
   optimized_schwarz->compute(x_neumann_matrix, x_robin_matrix);
 }
@@ -834,7 +831,7 @@ FROSchOperator<dim, Number, MemorySpace>::compute(
 
 template <int dim, typename Number, typename MemorySpace>
 unsigned int
-FROSchOperator<dim, Number, MemorySpace>::get_dof(const unsigned int cell,
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::get_dof(const unsigned int cell,
                                                   const unsigned int i) const
 {
   return (unsigned int)overlapping_map->getLocalElement(
@@ -844,9 +841,8 @@ FROSchOperator<dim, Number, MemorySpace>::get_dof(const unsigned int cell,
 
 
 template <int dim, typename Number, typename MemorySpace>
-Teuchos::RCP<
-  typename FROSchOperator<dim, Number, MemorySpace>::OptimizedSchwarzType>
-FROSchOperator<dim, Number, MemorySpace>::get_precondioner()
+Teuchos::RCP<LA::XpetraTypes::FROSchGeometricOneLevelType<Number, MemorySpace>>
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::get_precondioner()
 {
   return optimized_schwarz;
 }
@@ -855,7 +851,7 @@ FROSchOperator<dim, Number, MemorySpace>::get_precondioner()
 
 template <int dim, typename Number, typename MemorySpace>
 void
-FROSchOperator<dim, Number, MemorySpace>::reset()
+OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::reset()
 {
   dual_graph.reset();
   optimized_schwarz.reset();

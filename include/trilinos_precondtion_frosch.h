@@ -11,19 +11,26 @@
 
 #include <deal.II/lac/trilinos_tpetra_sparse_matrix.h>
 
+#include <deal.II/lac/trilinos_xpetra_types.h>
+
 // FROSch
-#include <FROSch_OneLevelOptimizedPreconditioner_decl.hpp>
-#include <FROSch_OneLevelOptimizedPreconditioner_def.hpp>
-#include <FROSch_OptimizedOperator_decl.h>
-#include <FROSch_OptimizedOperator_def.h>
-#include <FROSch_TwoLevelOptimizedPreconditioner_decl.hpp>
-#include <FROSch_TwoLevelOptimizedPreconditioner_def.hpp>
+#include <FROSch_GeometricOverlappingOperator_decl.hpp>
+#include <FROSch_GeometricOverlappingOperator_def.hpp>
+#include <FROSch_GeometricOneLevelPreconditioner_decl.hpp>
+#include <FROSch_GeometricOneLevelPreconditioner_def.hpp>
+#include <FROSch_GeometricTwoLevelPreconditioner_decl.hpp>
+#include <FROSch_GeometricTwoLevelPreconditioner_def.hpp>
 #include <Teuchos_ParameterList.hpp>
 
 DEAL_II_NAMESPACE_OPEN
 
+namespace LA {
+  using namespace LinearAlgebra;
+  using namespace TpetraWrappers;
+}
+
 /**
- * @class FROSchOperator
+ * @class OptimizedFROSchPreconditioner
  * @brief This class provides an interface between deal.II and the (optimized) FROSch preconditioner.
  *
  * The goal of this class is to create a Geometric Optimized Schwarz
@@ -42,66 +49,26 @@ DEAL_II_NAMESPACE_OPEN
 template <int dim,
           typename Number,
           typename MemorySpace = dealii::MemorySpace::Host>
-class FROSchOperator
+class OptimizedFROSchPreconditioner
 {
 public:
   // --- Declaration ---
-  using size_type = dealii::types::signed_global_dof_index;
-
-  // Get the NodeType based on the dealii::MemorySpace
-  using NodeType = Tpetra::KokkosCompat::KokkosDeviceWrapperNode<
-    typename MemorySpace::kokkos_space::execution_space,
-    typename MemorySpace::kokkos_space>;
-
-  // (templated) Tpetra Vector:
-  template <typename NumberType>
-  using MultiVectorType =
-    Tpetra::MultiVector<NumberType, int, size_type, NodeType>;
-
-  // (templated) Xpetra Vector:
-  template <typename NumberType>
-  using XMultiVectorType =
-    Xpetra::MultiVector<NumberType, int, size_type, NodeType>;
-  template <typename NumberType>
-  using XTpetraMultiVectorType =
-    Xpetra::TpetraMultiVector<NumberType, int, size_type, NodeType>;
-  template <typename NumberType>
-  using XMultiVectorFactory =
-    Xpetra::MultiVectorFactory<NumberType, int, size_type, NodeType>;
-
-  // Xpetra to Tpetra
-  using XTpetraMapType       = Xpetra::TpetraMap<int, size_type>;
-  using XTpetraGraphType     = Xpetra::TpetraCrsGraph<int, size_type>;
-  using XTpetraCrsMatrixType = Xpetra::TpetraCrsMatrix<double, int, size_type>;
-
-  // Xpetra Map, Graph and Matrix
-  using XMapType    = Xpetra::Map<int, size_type, NodeType>;
-  using XGraphType  = Xpetra::CrsGraph<int, size_type, NodeType>;
-  using XMatrixType = Xpetra::Matrix<Number, int, size_type, NodeType>;
-  using XCrsMatrixWrapType =
-    Xpetra::CrsMatrixWrap<Number, int, size_type, NodeType>;
-  using XCrsMatrixType = Xpetra::CrsMatrix<Number, int, size_type, NodeType>;
-
-  // Optimized Schwarz
-  using OptimizedSchwarzType =
-    FROSch::OneLevelOptimizedPreconditioner<double, int, size_type, NodeType>;
-  // Two Level Operator
-  // using OptimizedSchwarzType =
-  //  FROSch::TwoLevelOptimizedPreconditioner<double, int, size_type, NodeType>;
+  using LO = int;
+  using GO = dealii::types::signed_global_dof_index;
 
   /**
-   * @brief Constructor for the FROSchOperator class.
+   * @brief Constructor for the OptimizedFROSchPreconditioner class.
    *
-   * Initialize the FROSchOperator with a specified overlap for the Schwarz
+   * Initialize the OptimizedFROSchPreconditioner with a specified overlap for the Schwarz
    * preconditioner. The overlap determines the number of cells that each
    * subdomain overlaps into the next. The overlap must be greater than or equal
    * to 1, where 0 means no overlap.
    *
    * @param overlap The overlap for the Schwarz preconditioner. It must be >= 1.
    */
-  FROSchOperator(Teuchos::RCP<Teuchos::ParameterList> parameter_list);
+  OptimizedFROSchPreconditioner(Teuchos::RCP<Teuchos::ParameterList> parameter_list);
 
-  FROSchOperator(std::string xml_file);
+  OptimizedFROSchPreconditioner(std::string xml_file);
 
   /*
    * @brief Computes the dual graph of the given triangulation.
@@ -128,8 +95,7 @@ public:
    * @param matrix The system matrix from deal.II, assembled on the global system.
    */
   void
-  initialize(
-    LinearAlgebra::TpetraWrappers::SparseMatrix<Number, MemorySpace> &matrix);
+  initialize(LA::SparseMatrix<Number, MemorySpace> &matrix);
 
   /*
    * @brief Creates local overlapping triangulations based on the global problem.
@@ -175,10 +141,8 @@ public:
    * @param local_robin_matrix The matrix containing the optimized interface conditions.
    */
   void
-  compute(LinearAlgebra::TpetraWrappers::SparseMatrix<Number, MemorySpace>
-            &local_neumann_matrix,
-          LinearAlgebra::TpetraWrappers::SparseMatrix<Number, MemorySpace>
-            &local_robin_matrix);
+  compute(LA::SparseMatrix<Number, MemorySpace> &local_neumann_matrix,
+          LA::SparseMatrix<Number, MemorySpace> &local_robin_matrix);
 
   /**
    * @brief Returns the local dof index corresponding to the i-th dof on the cell.
@@ -202,14 +166,14 @@ public:
    *
    * @return The underlying OptimizedSchwarzOperator.
    */
-  Teuchos::RCP<OptimizedSchwarzType>
+  Teuchos::RCP<LA::XpetraTypes::FROSchGeometricOneLevelType<Number, MemorySpace>>
   get_precondioner();
 
   /**
-   * @brief Resets the FROSchOperator.
+   * @brief Resets the OptimizedFROSchPreconditioner.
    *
-   * This function resets the FROSchOperator, clearing any state that it may
-   * have. This is useful for reusing the same FROSchOperator object after
+   * This function resets the OptimizedFROSchPreconditioner, clearing any state that it may
+   * have. This is useful for reusing the same OptimizedFROSchPreconditioner object after
    * applying some grid refinement.
    */
   void
@@ -228,7 +192,7 @@ private:
    * OptimizedSchwarzOperator::communicateOverlappingTriangulation().
    */
   std::vector<Point<dim>>
-  extract_point_list(Teuchos::RCP<XMultiVectorType<double>> mv);
+  extract_point_list(Teuchos::RCP<LA::XpetraTypes::MultiVectorType<Number, MemorySpace>> mv);
 
   /**
    * @brief Converts the Xpetra::MultiVector cell_vector into a std::vector of dealii::CellData.
@@ -239,7 +203,7 @@ private:
    * OptimizedSchwarzOperator::communicateOverlappingTriangulation().
    */
   std::vector<CellData<dim>>
-  extract_cell_list(Teuchos::RCP<XMultiVectorType<size_type>> mv);
+  extract_cell_list(Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> mv);
 
   /**
    * @brief Converts the Xpetra::MultiVector into a std::vector of std::vector<int>.
@@ -250,7 +214,7 @@ private:
    * OptimizedSchwarzOperator::communicateOverlappingTriangulation().
    */
   std::vector<std::vector<int>>
-  extract_auxillary_list(Teuchos::RCP<XMultiVectorType<size_type>> mv);
+  extract_auxillary_list(Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> mv);
 
   /**
    * @brief Reads metadata from the auxillary_vector.
@@ -261,8 +225,8 @@ private:
    * @param mv The MultiVector.
    */
   void
-  extract_overlapping_map(Teuchos::RCP<XMultiVectorType<size_type>> mv,
-                          const size_type                           global_size,
+  extract_overlapping_map(Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> mv,
+                          const GO                                                    global_size,
                           MPI_Comm communicator);
 
   /**
@@ -273,7 +237,7 @@ private:
    * global_active_cell_index.
    */
   void
-  extract_index_list(Teuchos::RCP<XMultiVectorType<size_type>> mv);
+  extract_index_list(Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> mv);
 
   /**
    * @brief Reads metadata from the auxillary_vector.
@@ -282,7 +246,7 @@ private:
    * to each cell.
    */
   void
-  extract_dof_index_list(Teuchos::RCP<XMultiVectorType<size_type>> mv);
+  extract_dof_index_list(Teuchos::RCP<LA::XpetraTypes::MultiVectorType<GO, MemorySpace>> mv);
 
 
 
@@ -303,7 +267,7 @@ private:
    * the triangulation. It is used in the construction of the Schwarz
    * preconditioner.
    */
-  Teuchos::RCP<XGraphType> dual_graph;
+  Teuchos::RCP<LA::XpetraTypes::GraphType<MemorySpace>> dual_graph;
 
   /**
    * @brief The map which global_dof index lies on which local_subdomain.
@@ -311,7 +275,7 @@ private:
    * This map is used to determine the distribution of the degrees of freedom
    * across the subdomains.
    */
-  Teuchos::RCP<const XMapType> overlapping_map;
+  Teuchos::RCP<const LA::XpetraTypes::MapType<MemorySpace>> overlapping_map;
 
   /**
    * @brief The map from (original) global_active_cell_index onto the (new) overlapping global_active_cell_index.
@@ -332,16 +296,16 @@ private:
    * corresponds to a cell and contains a list of dof indices that belong to
    * that cell.
    */
-  std::vector<std::vector<size_type>> dof_index_list;
+  std::vector<std::vector<GO>> dof_index_list;
 
   /**
    * @brief The underlying Schwarz operator.
    */
-  Teuchos::RCP<OptimizedSchwarzType> optimized_schwarz;
+  Teuchos::RCP<LA::XpetraTypes::FROSchGeometricOneLevelType<Number, MemorySpace>> optimized_schwarz;
 };
 
 // instantiation
-template class FROSchOperator<2, double>;
+template class OptimizedFROSchPreconditioner<2, double>;
 
 
 DEAL_II_NAMESPACE_CLOSE

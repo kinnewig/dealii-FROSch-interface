@@ -47,9 +47,10 @@
 #include <deal.II/lac/dynamic_sparsity_pattern.h>
 #include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/sparsity_tools.h>
-#include <deal.II/lac/trilinos_tpetra_solver.h>
+#include <deal.II/lac/solver_gmres.h>
 #include <deal.II/lac/trilinos_tpetra_sparse_matrix.h>
 #include <deal.II/lac/trilinos_tpetra_vector.h>
+#include <deal.II/lac/trilinos_tpetra_precondition.h>
 #include <deal.II/lac/vector.h>
 
 #include <deal.II/numerics/data_out.h>
@@ -100,13 +101,13 @@ namespace Step40
     AffineConstraints<double> local_constraints;
 
     // Locally problem
-    Triangulation<dim>                                  local_triangulation;
-    DoFHandler<dim>                                     local_dof_handler;
-    LinearAlgebra::TpetraWrappers::SparseMatrix<double> local_neumann_matrix;
-    LinearAlgebra::TpetraWrappers::SparseMatrix<double> local_robin_matrix;
-    LinearAlgebra::TpetraWrappers::Vector<double>       local_system_rhs;
+    Triangulation<dim>                                               local_triangulation;
+    DoFHandler<dim>                                                  local_dof_handler;
+    LinearAlgebra::TpetraWrappers::SparseMatrix<double>              local_neumann_matrix;
+    LinearAlgebra::TpetraWrappers::SparseMatrix<double>              local_robin_matrix;
+    LinearAlgebra::TpetraWrappers::Vector<double, MemorySpace::Host> local_system_rhs;
 
-    FROSchOperator<dim, double> optimized_schwarz_operator;
+    OptimizedFROSchPreconditioner<dim, double> optimized_schwarz_operator;
 
     // --------------------------------------------------------
 
@@ -435,11 +436,9 @@ namespace Step40
 
     SolverControl solver_control(dof_handler.n_dofs(), 1e-12);
 
-    LinearAlgebra::TpetraWrappers::
-      SolverXpetra<double, Tpetra::KokkosClassic::DefaultNode::DefaultNodeType>
-        solver(solver_control, parameter_list);
+    SolverGMRES<LinearAlgebra::TpetraWrappers::Vector<double, MemorySpace::Host>> solver(solver_control);
 
-    LinearAlgebra::TpetraWrappers::XpetraOperatorWrap<double> preconditioner;
+    LinearAlgebra::TpetraWrappers::PreconditionGeometricFROSch<double> preconditioner("one_level");
     preconditioner.initialize(optimized_schwarz_operator.get_precondioner());
 
     // As a refernece it is intresting to use the default (Algebraic) Schwarz
@@ -453,7 +452,7 @@ namespace Step40
                  system_rhs,
                  preconditioner);
 
-    pcout << "Solved in " << solver.num_iterations << std::endl;
+    pcout << "Solved in " << solver_control.last_step() << std::endl;
 
     constraints.distribute(completely_distributed_solution);
     locally_relevant_solution = completely_distributed_solution;
