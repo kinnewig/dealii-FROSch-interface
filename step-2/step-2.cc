@@ -63,7 +63,7 @@
 #include <iostream>
 #include <string>
 
-namespace Step40
+namespace Step2
 {
   using namespace dealii;
 
@@ -136,7 +136,7 @@ namespace Step40
   LaplaceProblem<dim>::LaplaceProblem()
     : mpi_communicator(MPI_COMM_WORLD)
     , local_dof_handler(local_triangulation)
-    , optimized_schwarz_operator("parameter_list.xml")
+    , optimized_schwarz_operator("step-2.xml")
     , triangulation(mpi_communicator,
                     typename Triangulation<dim>::MeshSmoothing(
                       Triangulation<dim>::smoothing_on_refinement |
@@ -569,7 +569,7 @@ namespace Step40
         pcout << std::endl;
       }
   }
-} // namespace Step40
+} // namespace Step2
 
 
 
@@ -579,7 +579,7 @@ main(int argc, char *argv[])
   try
     {
       using namespace dealii;
-      using namespace Step40;
+      using namespace Step2;
 
       Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
 
