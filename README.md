@@ -5,6 +5,12 @@ This GitHub repository contains some code examples corresponding to the paper *C
 
 In step-1, a RAS preconditioner for the Laplace problem is demonstrated, and in in step-2, an ORAS preconditioner with Robin interface conditions is shown.
 
+Important aspects of this work are part of deal.II, which you can find here: https://github.com/kinnewig/dealii/tree/FROSch-preconditioner.
+Other important aspects of this work are part of FROSch, which is part of Trilinos. Therefore, you can find it here: https://github.com/kinnewig/Trilinos/tree/OptimizedSchwarz
+
+## Citation
+Please use the *Cite this repository* button in the *About* section of this repository.
+
 ## Installation - Dependencies
 The wrapper for FROSch was not yet merged into deal.II. Also, the Geometric FROSch preconditioner has yet to be yet merged into Trilinos. 
 
@@ -77,3 +83,38 @@ git cherry-pick 8153feedd25b9e0ccf925db5aedbb20f70059df4
 ```
 
 7. Configure and install deal.II, as usual.
+
+## Run the examples
+1. To run the examples, install deal.II and FROSch, as explained above.
+
+2. Download this repository
+```
+git clone git@github.com:kinnewig/dealii-FROSch-interface.git
+```
+
+3. Change into the example you like to execute
+```
+cd dealii-FROSch-interface/step-<n>
+```
+remember to replace <n> with the example you like to run!
+
+4. Compile the example via CMake:
+```
+cmake -S . -B build
+cmake --build build
+```
+
+5. (Optional: Switch to release)
+By default, the debugging modus is enabled. To switch to the release modus, use:
+```
+cd build
+make release
+cd ..
+```
+
+6. Run the program
+To execute the program:
+```
+./build/step-<n>
+```
+again, remember to replace <n> with the example you like to run!
