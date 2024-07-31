@@ -1,15 +1,21 @@
 /* ---------------------------------------------------------------------
  *
- * Copyright (C) 2009 - 2023 by the deal.II authors
+ * Copyright (C) 2024 Sebastian Kinnewig
  *
- * This file is part of the deal.II library.
+ * The code is licensed under the GNU Lesser General Public License as 
+ * published by the Free Software Foundation in version 2.1 
+ * The full text of the license can be found in the file LICENSE.md
  *
- * The deal.II library is free software; you can use it, redistribute
- * it, and/or modify it under the terms of the GNU Lesser General
- * Public License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- * The full text of the license can be found in the file LICENSE.md at
- * the top level directory of deal.II.
+ * ---------------------------------------------------------------------
+ * Contact:
+ *   Sebastian Kinnewig
+ *   Leibniz Universität Hannover (LUH)
+ *   Institut für Angewandte Mathematik (IfAM)
+ *
+ * Questions?
+ *   E-Mail: kinnewig@ifam.uni-hannover.de
+ *
+ * Date: Jul 31, 2024
  *
  * ---------------------------------------------------------------------
  *

@@ -1,3 +1,32 @@
+/* ---------------------------------------------------------------------
+ *
+ * Copyright (C) 2024 Sebastian Kinnewig
+ *
+ * The code is licensed under the GNU Lesser General Public License as 
+ * published by the Free Software Foundation in version 2.1 
+ * The full text of the license can be found in the file LICENSE.md
+ *
+ * ---------------------------------------------------------------------
+ * Contact:
+ *   Sebastian Kinnewig
+ *   Leibniz Universität Hannover (LUH)
+ *   Institut für Angewandte Mathematik (IfAM)
+ *
+ * Questions?
+ *   E-Mail: kinnewig@ifam.uni-hannover.de
+ *
+ * Date: Jul 31, 2024
+ *
+ * ---------------------------------------------------------------------
+ *
+ * As a starting point for this implementation deal.II example step-40
+ * was used.
+ *
+ * The goal of this program is to solve a two dimensional Laplace
+ * equation as a demonstration of the of the Optimized Schwarz
+ * Preconditioner of the Trilinos package FROSch.
+ */
+
 #include <Teuchos_ParameterList.hpp>
 #include <parameter_reader.h>
 
