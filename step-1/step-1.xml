@@ -1,0 +1,40 @@
+<ParameterList name="FROSch Example">
+    <ParameterList name="Preconditioner List">
+        <Parameter name="OverlappingOperator Type"         type="string" value="AlgebraicOverlappingOperator"/>
+        <Parameter name="CoarseOperator Type"              type="string" value="IPOUHarmonicCoarseOperator"/>
+        <Parameter name="Dimension"                        type="int"    value="2"/>
+        <Parameter name="Overlap"                          type="int"    value="3"/>
+        <ParameterList name="AlgebraicOverlappingOperator">
+            <Parameter name="Combine Values in Overlap"    type="string" value="Full"/>
+            <ParameterList name="Solver">
+                <Parameter name="SolverType"               type="string" value="Amesos2"/>
+                <Parameter name="Solver"                   type="string" value="Umfpack"/>
+            </ParameterList>
+        </ParameterList>
+        <ParameterList name="IPOUHarmonicCoarseOperator">
+            <ParameterList name="Blocks">
+                <ParameterList name="1">
+                    <Parameter name="Use For Coarse Space" type="bool"   value="true"/>
+                    <ParameterList name="InterfacePartitionOfUnity">
+                        <Parameter name="Type"             type="string" value="GDSW"/>
+                    </ParameterList>
+                </ParameterList>
+            </ParameterList>
+            <ParameterList name="ExtensionSolver">
+                <Parameter name="SolverType"               type="string" value="Amesos2"/>
+                <Parameter name="Solver"                   type="string" value="Umfpack"/>
+            </ParameterList>
+            <ParameterList name="CoarseSolver">
+                <Parameter name="SolverType"               type="string" value="Amesos2"/>
+                <Parameter name="Solver"                   type="string" value="Umfpack"/>
+            </ParameterList>
+        </ParameterList>
+    </ParameterList>
+    <ParameterList name="Mesh and Geometry">
+        <Parameter name="Number of refinements"           type="int"    value="5"/>
+        <Parameter name="Polynomial degree"               type="int"    value="1"/>
+    </ParameterList>
+    <ParameterList name="Output Parameters">
+        <Parameter name="Output File"                     type="string" value="solution"/>
+    </ParameterList>
+</ParameterList>
