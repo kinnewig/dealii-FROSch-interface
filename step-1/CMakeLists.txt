@@ -1,28 +1,24 @@
 ##
-#  CMake script for the step-40 tutorial program:
+#  CMake script for step-1: FROSch preconditioner in deal.II
 ##
 
 # Set the name of the project and target:
 set(TARGET "step-1")
 
-# Declare all source files the target consists of. Here, this is only
-# the one step-X.cc file, but as you expand your project you may wish
-# to add other source files as well. If your project becomes much larger,
-# you may want to either replace the following statement by something like
+# Add th esource folder
 file(GLOB_RECURSE TARGET_SRC  "source/*.cc" )
+
+# Add the include folder
 include_directories(include)
-# or switch altogether to the large project CMakeLists.txt file discussed
-# in the "CMake in user projects" page accessible from the "User info"
-# page of the documentation.
+
+# Declare all source files the target consists of:
 set(TARGET_SRC
     ${TARGET_SRC}
     ${GRID_SRC}
     ${TARGET}.cc
 )
 
-
 # Usually, you will not need to modify anything beyond this point...
-
 cmake_minimum_required(VERSION 3.13.4)
 
 find_package(deal.II 9.6.0
