@@ -1,0 +1,28 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: deal.II - FROSch Interface
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Sebastian
+    family-names: Kinnewig
+    email: kinnewig@ifam.uni-hannover.de
+    orcid: 'https://orcid.org/0000-0002-0923-7413'
+    affiliation: Leibniz University Hannover
+repository-code: 'https://github.com/kinnewig/dealii-FROSch-interface'
+abstract: >-
+  Tpetra-based interface for coupling {\frosch} (Fast and
+  Robust Overlapping Schwarz) and {\dealii} 
+
+  (differential equations analysis library). Moreover, this
+  interface enables the use of FROSch as an Optimized
+  Restricted Additive Schwarz (ORAS) preconditioner.
+keywords:
+  - Finite Element Method
+  - ORAS
+  - Domain Decomposition
+license: LGPL-2.1
