@@ -13,6 +13,10 @@ authors:
     email: kinnewig@ifam.uni-hannover.de
     orcid: 'https://orcid.org/0000-0002-0923-7413'
     affiliation: Leibniz University Hannover
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.13834405
+    description: deal.II FROSch interface version 1.0.0
 repository-code: 'https://github.com/kinnewig/dealii-FROSch-interface'
 abstract: >-
   Tpetra-based interface for coupling {\frosch} (Fast and
@@ -26,3 +30,6 @@ keywords:
   - ORAS
   - Domain Decomposition
 license: LGPL-2.1
+commit: 639e071c8dd47121ee715a141ec337a5b926518c
+version: 1.0.0
+date-released: '2024-09-24'

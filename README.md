@@ -11,6 +11,8 @@ Other important aspects of this work are part of FROSch, which is part of Trilin
 ## Citation
 Please use the *Cite this repository* button in the *About* section of this repository.
 
+[![DOI](https://zenodo.org/badge/795637427.svg)](https://zenodo.org/doi/10.5281/zenodo.13834404)
+
 ## Installation - Dependencies
 The wrapper for FROSch was not yet merged into deal.II. Also, the Geometric FROSch preconditioner has yet to be yet merged into Trilinos. 
 
