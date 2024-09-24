@@ -20,7 +20,7 @@ This is a CMake script that installs dea.lII along with its dependencies. And it
 tl;dr:
 1. Step: Download dcs2:
 ```
-git clone git@github.com:kinnewig/dcs2.git
+git clone https://github.com/kinnewig/dcs2.git
 cd dcs2
 ```
 2. Step: Run the install script:
