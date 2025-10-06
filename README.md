@@ -3,7 +3,17 @@
 This GitHub repository contains some code examples corresponding to the paper *Coupling deal.II and FROSch: A Sustainable and Accessible
 (O)RAS Preconditioner*.
 
-In step-1, a RAS preconditioner for the Laplace problem is demonstrated, and in in step-2, an ORAS preconditioner with Robin interface conditions is shown.
+## Overview of available examples:
+We provide a range of different application examples.
+
+# Step-1: RAS for Laplace
+Example of an one-level RAS preconditioner for the Laplace problem. 
+
+# Step-2: ORAS for Laplace
+Example of an one-level ORAS preconditioner with Robin interface conditions applied to a Laplace problem.
+
+# Step-Maxwell: ORAS for Maxwell
+Here we demonstrate how to apply the one-level ORAS preconditioner, provided by the deal.II-FROSch interface to the time-harmonic Maxwell's equations.
 
 Important aspects of this work are part of deal.II, which you can find here: https://github.com/kinnewig/dealii/tree/FROSch-preconditioner.
 Other important aspects of this work are part of FROSch, which is part of Trilinos. Therefore, you can find it here: https://github.com/kinnewig/Trilinos/tree/OptimizedSchwarz
