@@ -177,6 +177,12 @@ namespace Step2
 
     dof_handler.distribute_dofs(fe);
 
+    // Get the working index sets:
+    // locally_owned_dofs stores a one-to-one map of all dofs, and holds
+    //                    the dofs that belong to this rank.
+    // locally_relevant_dofs contains the locally_owned_dofs and also some
+    //                    dofs that do belong to other ranks but are relevant
+    //                    for the rank.
     locally_owned_dofs = dof_handler.locally_owned_dofs();
     locally_relevant_dofs =
       DoFTools::extract_locally_relevant_dofs(dof_handler);
