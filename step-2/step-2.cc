@@ -64,7 +64,7 @@
 #include <deal.II/numerics/vector_tools.h>
 
 // Optimized Schwarz Preconditioner
-#include <trilinos_precondtion_frosch.h>
+#include <trilinos_precondition_frosch.h>
 #include <parameter_reader.h>
 
 #include <iostream>

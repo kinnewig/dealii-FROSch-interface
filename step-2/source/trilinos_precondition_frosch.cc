@@ -33,7 +33,7 @@
 
 #include <Teuchos_ParameterList.hpp>
 #include <Xpetra_CrsGraphFactory.hpp>
-#include <trilinos_precondtion_frosch.h>
+#include <trilinos_precondition_frosch.h>
 
 #include <algorithm>
 
