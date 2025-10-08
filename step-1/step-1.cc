@@ -1,6 +1,6 @@
 /* ---------------------------------------------------------------------
  *
- * Copyright (C) 2024 Sebastian Kinnewig
+ * Copyright (C) 2024 - 2025 Sebastian Kinnewig
  *
  * The code is licensed under the GNU Lesser General Public License as 
  * published by the Free Software Foundation in version 2.1 
