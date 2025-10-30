@@ -9,6 +9,9 @@
  * ---------------------------------------------------------------------
  */
 
+#ifndef kirasfm_trilinos_precondition_frosch_h
+#define kirasfm_trilinos_precondition_frosch_h
+
 // deal.II
 #include <deal.II/base/index_set.h>
 #include <deal.II/base/utilities.h>
@@ -31,6 +34,11 @@
 #include <FROSch_GeometricTwoLevelPreconditioner_decl.hpp>
 #include <FROSch_GeometricTwoLevelPreconditioner_def.hpp>
 #include <Teuchos_ParameterList.hpp>
+
+// KirasFM-FROSch
+#include <trilinos_xpetra_types.h>
+#include <trilinos_tpetra_precondition_optimized_frosch.h>
+#include <trilinos_tpetra_precondition_optimized_frosch.templates.h>
 
 DEAL_II_NAMESPACE_OPEN
 
@@ -325,9 +333,10 @@ private:
 };
 
 // instantiation
-template class OptimizedFROSchPreconditioner<2, double>;
+//template class OptimizedFROSchPreconditioner<2, double>;
 
-template class OptimizedFROSchPreconditioner<3, double>;
-
+//template class OptimizedFROSchPreconditioner<3, double>;
 
 DEAL_II_NAMESPACE_CLOSE
+
+#endif // kirasfm_trilinos_precondition_frosch_h

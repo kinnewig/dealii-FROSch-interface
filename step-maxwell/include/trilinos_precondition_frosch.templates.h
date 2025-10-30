@@ -9,6 +9,9 @@
  * ---------------------------------------------------------------------
  */
 
+#ifndef kirasfm_trilinos_precondition_frosch_templates_h
+#define kirasfm_trilinos_precondition_frosch_templates_h
+
 #include <deal.II/base/geometry_info.h>
 
 #include <Teuchos_ParameterList.hpp>
@@ -272,11 +275,11 @@ OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::create_local_triangulat
   // uniqueMap->describe(*out, Teuchos::VERB_EXTREME);
 
   // creat global_to_local
-  Teuchos::Array<long long> vertex_array(
+  Teuchos::Array<int> vertex_array( // TODO: size_type
     triangulation.n_locally_owned_active_cells() *
     GeometryInfo<dim>::vertices_per_cell);
 
-  long long vertex_counter = 0;
+  long long vertex_counter = 0; // TODO: size_type
   for (auto &cell : triangulation.cell_iterators())
     {
       if (!cell->is_active())
@@ -580,6 +583,6 @@ OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::reset()
   overlapping_map.reset();
 }
 
-
-
 DEAL_II_NAMESPACE_CLOSE
+
+#endif // kirasfm_trilinos_precondition_frosch_templates_h

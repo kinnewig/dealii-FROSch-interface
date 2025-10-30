@@ -1,7 +1,7 @@
 <ParameterList name="Step-Maxwell">
   <ParameterList name="Preconditioner List">
     <Parameter name="OverlappingOperator Type"          type="string" value="GeometricOverlappingOperator"/>
-    <Parameter name="Dimension"                         type="int"    value="2"/>
+    <Parameter name="Dimension"                         type="int"    value="3"/>
     <Parameter name="Overlap"                           type="int"    value="3"/>
     <ParameterList name="GeometricOverlappingOperator">
       <Parameter name="Combine Values in Overlap"       type="string" value="Restricted"/>
@@ -16,12 +16,12 @@
     </ParameterList>
   </ParameterList>
   <ParameterList name="Material Parameters">
-      <Parameter name="Lambda"                         type="double"  value="0.35"/>
-      <Parameter name="Refrective Index"               type="string"  value="{ 1.0, 0.0, 2.0, 0.0 }" />
+      <Parameter name="Lambda"                         type="double"  value="2.5"/>
+      <Parameter name="Refrective Index"               type="string"  value="{ 1.0, 0.0, 0.0, 4.0 }" />
   </ParameterList>
   <ParameterList name="Mesh and Geometry">
-      <Parameter name="Number of refinements"           type="int"    value="5"/>
-      <Parameter name="Polynomial degree"               type="int"    value="1"/>
+      <Parameter name="Number of refinements"           type="int"    value="3"/>
+      <Parameter name="Polynomial degree"               type="int"    value="0"/>
   </ParameterList>
   <ParameterList name="Output Parameters">
       <Parameter name="Output File"                     type="string" value="solution"/>

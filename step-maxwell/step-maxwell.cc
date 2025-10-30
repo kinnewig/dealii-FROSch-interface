@@ -76,7 +76,13 @@
 #include <post_processing.h>
 
 // Optimized Schwarz Preconditioner
+#include <trilinos_tpetra_precondition_optimized_frosch.h>
+#include <trilinos_tpetra_precondition_optimized_frosch.templates.h>
 #include <trilinos_precondition_frosch.h>
+#include <trilinos_precondition_frosch.templates.h>
+
+#include <kirasfm_grid_generator.h>
+
 #include <parameter_reader.h>
 
 #include <iostream>
@@ -100,6 +106,9 @@ namespace StepMaxwell
     make_grid();
 
     void
+    make_nanoparticle();
+
+    void
     setup_system();
 
     void
@@ -113,6 +122,9 @@ namespace StepMaxwell
 
     void
     output_results() const;
+
+    double
+    compute_point_value (Point<dim> p, const unsigned int component) const;
 
     // --------------------------------------------------------
     // additional functions
@@ -266,6 +278,38 @@ namespace StepMaxwell
     GridOut().write_vtk(triangulation, output_file);
   }
 
+
+  template <int dim>
+  void
+  MaxwellProblem<dim>::make_nanoparticle()
+  {
+    TimerOutput::Scope t(computing_timer, "make grid");
+    NanoParticle::create(triangulation, 1.0, 2.0, true);
+
+    // refine the grid
+    const unsigned int n_refinements =
+      prm.get_integer("Mesh and Geometry", "Number of refinements");
+    triangulation.refine_global(n_refinements);
+
+    for (auto &cell : triangulation.active_cell_iterators())
+      for (unsigned int face = 0; face < GeometryInfo<dim>::faces_per_cell;
+           ++face)
+        {
+          if (!cell->face(face)->at_boundary())
+            continue;
+
+          if (cell->face(face)->boundary_id() == 0)
+            cell->face(face)->set_boundary_id(1);
+
+          else
+            cell->face(face)->set_boundary_id(0);
+        }
+
+    //// Print grid:
+    //std::ofstream out("grid.vtk");
+    //GridOut       grid_out;
+    //grid_out.write_vtk(triangulation, out);
+  }
 
 
   template <int dim>
@@ -1209,12 +1253,37 @@ namespace StepMaxwell
 
 
 
+  // With help of this function, we extract 
+  // point values for a certain component from our
+  // discrete solution. 
+  template <int dim>
+  double 
+  MaxwellProblem<dim>::compute_point_value (Point<dim> p, 
+  					                                const unsigned int component) const  
+  {
+    double value = -1e100;
+  
+    try
+      {
+        Vector<double> tmp_vector(dof_handler.get_fe().n_components());
+        VectorTools::point_value(dof_handler, locally_relevant_solution, p, tmp_vector);
+        value = tmp_vector(component);
+      }
+    catch (typename VectorTools::ExcPointNotAvailableHere &e)
+      {}
+  
+    return Utilities::MPI::max(value, mpi_communicator);
+  }
+
+
+
   template <int dim>
   void
   MaxwellProblem<dim>::run()
   {
     // create the grid
-    make_grid();
+    //make_grid();
+    make_nanoparticle();
 
     // compute the dual graph
     optimized_schwarz_operator.export_crs(triangulation);
@@ -1252,6 +1321,51 @@ namespace StepMaxwell
 
     solve();
 
+    { // evaluate:
+       // Point: 1,0,0
+       double real_x = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 0);
+       double real_y = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 1);
+       double real_z = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 2);
+       double complex_x = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 3);
+       double complex_y = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 4);
+       double complex_z = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 5);
+
+       pcout << "Point: 0,0,0:" << std::endl;
+       pcout << real_x << " + " << complex_x << std::endl;
+       pcout << real_y << " + " << complex_y << std::endl;
+       pcout << real_z << " + " << complex_z << std::endl;
+       pcout << std::endl;
+
+       real_x = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 0);
+       real_y = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 1);
+       real_z = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 2);
+       complex_x = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 3);
+       complex_y = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 4);
+       complex_z = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 5);
+
+       pcout << "Point: 1,0,0:" << std::endl;
+       pcout << real_x << " + " << complex_x << std::endl;
+       pcout << real_y << " + " << complex_y << std::endl;
+       pcout << real_z << " + " << complex_z << std::endl;
+       pcout << std::endl;
+
+       // Point: 1.5,0,0
+       real_x = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 0);
+       real_y = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 1);
+       real_z = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 2);
+       complex_x = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 3);
+       complex_y = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 4);
+       complex_z = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 5);
+
+       pcout << "Point: 1.5,0,0:" << std::endl;
+       pcout << real_x << " + " << complex_x << std::endl;
+       pcout << real_y << " + " << complex_y << std::endl;
+       pcout << real_z << " + " << complex_z << std::endl;
+       pcout << std::endl;
+
+       pcout << "L2_norm: " << locally_relevant_solution.l2_norm() << std::endl;
+    }
+
     {
       TimerOutput::Scope t(computing_timer, "output");
       output_results();
@@ -1287,8 +1401,8 @@ main(int argc, char *argv[])
         {
           case 2:
             {
-              MaxwellProblem<2> maxwell_problem("step-maxwell.xml", MPI_COMM_WORLD);
-              maxwell_problem.run();
+              //MaxwellProblem<2> maxwell_problem("step-maxwell.xml", MPI_COMM_WORLD);
+              //maxwell_problem.run();
 
               break;
             }
