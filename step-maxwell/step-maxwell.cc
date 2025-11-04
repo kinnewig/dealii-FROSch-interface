@@ -181,6 +181,11 @@ namespace StepMaxwell
 
     ConditionalOStream pcout;
     TimerOutput        computing_timer;
+
+    // --------------------------------------------------------
+    // TODO Workarround:
+    bool     this_rank_is_empty;
+    MPI_Comm mpi_communicator_workarround;
   };
 
 
@@ -208,6 +213,7 @@ namespace StepMaxwell
                       pcout,
                       TimerOutput::never,
                       TimerOutput::wall_times)
+    , this_rank_is_empty(false) /*TODO: This is part of a workarround*/
   {
     for (unsigned int i = 0; i < refrective_index.size(); ++i)
       omega[i] = refrective_index[i] * (2.0 * numbers::PI / lambda);
@@ -324,13 +330,57 @@ namespace StepMaxwell
     locally_relevant_dofs =
       DoFTools::extract_locally_relevant_dofs(dof_handler);
 
-    locally_relevant_solution.reinit(locally_owned_dofs,
-                                     locally_relevant_dofs,
-                                     mpi_communicator);
-    system_rhs.reinit(locally_owned_dofs,
-                      locally_relevant_dofs,
-                      mpi_communicator,
-                      true);
+    {
+      // TODO: Workarround
+      // On some ranks there are no locally owned cells, we need to identfiy those
+      // ranks. 
+      
+      // We begin by identfiying all ranks that do not own any cells.
+      // Ranks that do own cells are flaged by "-1".
+      int rank = -1;
+      if (triangulation.n_locally_owned_active_cells() == 0)
+        {
+          MPI_Comm_rank(mpi_communicator, &rank);
+          this_rank_is_empty = true;
+        }
+
+      // Communicate and extract the ranks without any cells
+      std::vector<int> missing_ranks_gathered = 
+        Utilities::MPI::all_gather(mpi_communicator, rank);
+
+      std::vector<int> missing_ranks;
+
+      for (auto missing : missing_ranks_gathered)
+        if (missing != -1)
+          missing_ranks.push_back(missing);
+
+      // Create the new communicator
+      MPI_Group orig_group, workarround_group;
+
+      // Create a group from the original communicator
+      MPI_Comm_group(mpi_communicator, &orig_group);
+
+      // Exclude certain ranks from the group
+      MPI_Group_excl(orig_group, missing_ranks.size(), missing_ranks.data(), &workarround_group);
+
+      // Create a new communicator from the group
+      MPI_Comm_create(MPI_COMM_WORLD, workarround_group, &mpi_communicator_workarround);
+
+      // Now you can use mpi_communicator_workarround, 
+      // which excludes the ranks that do not own any cells
+    }
+
+
+    if ( !this_rank_is_empty )
+      {
+        locally_relevant_solution.reinit(locally_owned_dofs,
+                       locally_relevant_dofs,
+                        mpi_communicator_workarround);
+    	system_rhs.reinit(locally_owned_dofs,
+    	                  locally_relevant_dofs,
+    	                  mpi_communicator_workarround);
+    	                  true);
+      }
 
     constraints.clear();
     constraints.reinit(locally_owned_dofs, locally_relevant_dofs);
@@ -361,17 +411,20 @@ namespace StepMaxwell
     constraints.close();
 
     DynamicSparsityPattern dsp(locally_relevant_dofs);
-
     DoFTools::make_sparsity_pattern(dof_handler, dsp, constraints, false);
-    SparsityTools::distribute_sparsity_pattern(dsp,
-                                               dof_handler.locally_owned_dofs(),
-                                               mpi_communicator,
-                                               locally_relevant_dofs);
 
-    system_matrix.reinit(locally_owned_dofs,
-                         locally_owned_dofs,
-                         dsp,
-                         mpi_communicator);
+    if ( !this_rank_is_empty )
+      {
+        SparsityTools::distribute_sparsity_pattern(dsp,
+                                                   dof_handler.locally_owned_dofs(),
+                                                   mpi_communicator_workarround,
+                                                   locally_relevant_dofs);
+
+        system_matrix.reinit(locally_owned_dofs,
+                             locally_owned_dofs,
+                             dsp,
+                             mpi_communicator_workarround);
+      }
   }
 
 
@@ -773,7 +826,8 @@ namespace StepMaxwell
                             true);
 
     local_constraints.clear();
-    local_constraints.reinit(local_locally_relevant_dofs);
+    local_constraints.reinit(local_locally_owned_dofs,
+                             local_locally_relevant_dofs);
     DoFTools::make_hanging_node_constraints(local_dof_handler,
                                             local_constraints);
 
@@ -1191,7 +1245,7 @@ namespace StepMaxwell
   {
     TimerOutput::Scope t(computing_timer, "solve");
     LinearAlgebra::TpetraWrappers::Vector<double>
-      completely_distributed_solution(locally_owned_dofs, mpi_communicator);
+      completely_distributed_solution(locally_owned_dofs, mpi_communicator_workarround);
 
     SolverControl solver_control(dof_handler.n_dofs(), 1e-12);
 
@@ -1289,8 +1343,12 @@ namespace StepMaxwell
     optimized_schwarz_operator.export_crs(triangulation);
 
     setup_system();
-    assemble_system();
-    assemble_system_rhs();
+
+    if ( !this_rank_is_empty )
+      {
+        assemble_system();
+        assemble_system_rhs();
+      }
 
     optimized_schwarz_operator.initialize(system_matrix);
 
@@ -1304,22 +1362,27 @@ namespace StepMaxwell
 
     // First we need to set up and assemble the global system
     // setup_system();
-    setup_local_system();
+    if ( !this_rank_is_empty )
+      {
+        setup_local_system();
 
-    optimized_schwarz_operator.create_overlapping_map(local_dof_handler, dof_handler.n_dofs(), mpi_communicator);
+        optimized_schwarz_operator.create_overlapping_map(local_dof_handler,
+                                                          dof_handler.n_dofs(),
+                                                          mpi_communicator_workarround);
 
-    assemble_local_system();
+        assemble_local_system();
 
-    optimized_schwarz_operator.compute(local_neumann_matrix,
-                                       local_robin_matrix);
+        optimized_schwarz_operator.compute(local_neumann_matrix,
+                                           local_robin_matrix);
 
 
-    pcout << "   Number of active cells:       "
-          << triangulation.n_global_active_cells() << std::endl
-          << "   Number of degrees of freedom: " << dof_handler.n_dofs()
-          << std::endl;
+        pcout << "   Number of active cells:       "
+              << triangulation.n_global_active_cells() << std::endl
+              << "   Number of degrees of freedom: " << dof_handler.n_dofs()
+              << std::endl;
 
-    solve();
+        solve();
+      }
 
     { // evaluate:
        // Point: 1,0,0
