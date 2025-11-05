@@ -2,12 +2,12 @@
   <ParameterList name="Preconditioner List">
     <Parameter name="OverlappingOperator Type"          type="string" value="GeometricOverlappingOperator"/>
     <Parameter name="Dimension"                         type="int"    value="3"/>
-    <Parameter name="Overlap"                           type="int"    value="3"/>
+    <Parameter name="Overlap"                           type="int"    value="4"/>
     <ParameterList name="GeometricOverlappingOperator">
       <Parameter name="Combine Values in Overlap"       type="string" value="Restricted"/>
       <ParameterList name="Solver">
         <Parameter name="SolverType"                    type="string" value="Amesos2"/>
-        <Parameter name="Solver"                        type="string" value="KLU"/>
+        <Parameter name="Solver"                        type="string" value="MUMPS"/>
       </ParameterList>
       <ParameterList name="Update Scalar Multipliers">
         <Parameter name="Alpha"                           type="double" value="1.0" />
@@ -20,7 +20,7 @@
       <Parameter name="Refrective Index"               type="string"  value="{ 1.0, 0.0, 0.0, 4.0 }" />
   </ParameterList>
   <ParameterList name="Mesh and Geometry">
-      <Parameter name="Number of refinements"           type="int"    value="3"/>
+      <Parameter name="Number of refinements"           type="int"    value="5"/>
       <Parameter name="Polynomial degree"               type="int"    value="0"/>
   </ParameterList>
   <ParameterList name="Output Parameters">

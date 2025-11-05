@@ -280,22 +280,24 @@ OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::create_local_triangulat
     GeometryInfo<dim>::vertices_per_cell);
 
   long long vertex_counter = 0; // TODO: size_type
-  for (auto &cell : triangulation.cell_iterators())
-    {
-      if (!cell->is_active())
-        continue;
+  
+  if (triangulation.n_locally_owned_active_cells() != 0)
+    for (auto &cell : triangulation.cell_iterators())
+      {
+        if (!cell->is_active())
+          continue;
 
-      if (!cell->is_locally_owned())
-        continue;
+        if (!cell->is_locally_owned())
+          continue;
 
-      // loop over all verices
-      for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
-        {
-          vertex_array[vertex_counter] =
-            cell->vertex_index(vertex_index);
-          vertex_counter++;
-        }
-    }
+        // loop over all verices
+        for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
+          {
+            vertex_array[vertex_counter] =
+              cell->vertex_index(vertex_index);
+            vertex_counter++;
+          }
+      }
   FROSch::sortunique(vertex_array);
 
 
@@ -385,47 +387,49 @@ OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::create_local_triangulat
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
   GO cell_counter = 0;
-  for (auto &cell : dof_handler.active_cell_iterators())
-    {
-      if (!cell->is_locally_owned())
-        continue;
 
-      // Fill node_vector:
-      for (unsigned int i = 0; i < dim; ++i)
+  if (triangulation.n_locally_owned_active_cells() != 0)
+    for (auto &cell : dof_handler.active_cell_iterators())
+      {
+        if (!cell->is_locally_owned())
+          continue;
+
+        // Fill node_vector:
+        for (unsigned int i = 0; i < dim; ++i)
+          for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
+            nodes_vector_data[i][x_local_to_global_map->getLocalElement(
+              cell->vertex_index(vertex_index))] =
+              cell->vertex(vertex_index)[i];
+
+        // Fill cell_data_vector:
         for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
-          nodes_vector_data[i][x_local_to_global_map->getLocalElement(
-            cell->vertex_index(vertex_index))] =
-            cell->vertex(vertex_index)[i];
+          cell_vector_data[vertex_index][cell_counter] =
+            cell->vertex_index(vertex_index);
 
-      // Fill cell_data_vector:
-      for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
-        cell_vector_data[vertex_index][cell_counter] =
-          cell->vertex_index(vertex_index);
+        // Fill auxillary_vector:
+        if (cell->at_boundary())
+          for (unsigned int face = 0; face < faces_per_cell; face++)
+            if (cell->face(face)->at_boundary())
+              {
+                auxillary_vector_data[face][cell_counter] =
+                  cell->face(face)->boundary_id();
+                auxillary_vector_data[faces_per_cell + face][cell_counter] =
+                  cell->face(face)->manifold_id();
+              }
 
-      // Fill auxillary_vector:
-      if (cell->at_boundary())
-        for (unsigned int face = 0; face < faces_per_cell; face++)
-          if (cell->face(face)->at_boundary())
-            {
-              auxillary_vector_data[face][cell_counter] =
-                cell->face(face)->boundary_id();
-              auxillary_vector_data[faces_per_cell + face][cell_counter] =
-                cell->face(face)->manifold_id();
-            }
+        cell->get_dof_indices(local_dof_indices);
+        for (unsigned int i = 0; i < dofs_per_cell; ++i)
+          auxillary_vector_data[(2 * faces_per_cell) + i][cell_counter] =
+            local_dof_indices[i];
 
-      cell->get_dof_indices(local_dof_indices);
-      for (unsigned int i = 0; i < dofs_per_cell; ++i)
-        auxillary_vector_data[(2 * faces_per_cell) + i][cell_counter] =
-          local_dof_indices[i];
+        // Add information about the system to the auxiallary list:
+        auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 0]
+                             [cell_counter] = cell->material_id();
+        auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 1]
+                             [cell_counter] = cell->global_active_cell_index();
 
-      // Add information about the system to the auxiallary list:
-      auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 0]
-                           [cell_counter] = cell->material_id();
-      auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 1]
-                           [cell_counter] = cell->global_active_cell_index();
-
-      cell_counter++;
-    }
+        cell_counter++;
+      }
 
 
   // ------------------------------------------------------------------------------------------
@@ -468,28 +472,29 @@ OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::create_local_triangulat
 
   // reapply boundaries
   cell_counter = 0;
-  for (auto &cell : local_triangulation.cell_iterators())
-    {
-      cell->set_material_id(
-        sub_cell_data[cell_counter][(2 * faces_per_cell) + dofs_per_cell]);
+  if (triangulation.n_locally_owned_active_cells() != 0)
+    for (auto &cell : local_triangulation.cell_iterators())
+      {
+        cell->set_material_id(
+          sub_cell_data[cell_counter][(2 * faces_per_cell) + dofs_per_cell]);
 
-      if (cell->at_boundary())
-        for (unsigned int face = 0; face < faces_per_cell; face++)
-          if (cell->face(face)->at_boundary())
-            {
-              cell->face(face)->set_manifold_id(
-                sub_cell_data[cell_counter][faces_per_cell + face]);
+        if (cell->at_boundary())
+          for (unsigned int face = 0; face < faces_per_cell; face++)
+            if (cell->face(face)->at_boundary())
+              {
+                cell->face(face)->set_manifold_id(
+                  sub_cell_data[cell_counter][faces_per_cell + face]);
 
-              if (sub_cell_data[cell_counter][face] == -1)
-                // this indicates, we are on an internal edge, therefore
-                // we need to assign the interface_boundary_id
-                cell->face(face)->set_boundary_id(interface_boundary_id);
-              else
-                cell->face(face)->set_boundary_id(
-                  sub_cell_data[cell_counter][face]);
-            }
-      cell_counter++;
-    }
+                if (sub_cell_data[cell_counter][face] == -1)
+                  // this indicates, we are on an internal edge, therefore
+                  // we need to assign the interface_boundary_id
+                  cell->face(face)->set_boundary_id(interface_boundary_id);
+                else
+                  cell->face(face)->set_boundary_id(
+                    sub_cell_data[cell_counter][face]);
+              }
+        cell_counter++;
+      }
 
   // just for debugging
   // int rank;
@@ -507,25 +512,49 @@ void
 OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::create_overlapping_map(
   DoFHandler<dim> &local_dof_handler,
   unsigned int     global_size,
-  MPI_Comm         communicator)
+  MPI_Comm         communicator,
+  bool             is_empty)
 {
-  const unsigned int dofs_per_cell =
-    local_dof_handler.get_fe().n_dofs_per_cell();
 
-  std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell, -1);
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  Teuchos::Array<GO> array(local_dof_handler.n_locally_owned_dofs());
+  MPI_Barrier(communicator);
+  if (rank == 0)
+    std::cout << "Checkpoint 8.1" << std::endl;
 
-  unsigned int cell_counter = 0;
-  for (auto &cell : local_dof_handler.active_cell_iterators())
+  Teuchos::Array<GO> array;
+
+  if (!is_empty)
     {
-      cell->get_dof_indices(local_dof_indices);
+      const unsigned int dofs_per_cell =
+        local_dof_handler.get_fe().n_dofs_per_cell();
 
-      for (unsigned int i = 0; i < dofs_per_cell; ++i)
-        array[local_dof_indices[i]] = dof_index_list[cell_counter][i];
+      if (rank == 0)
+        std::cout << "Checkpoint 8.2" << std::endl;
 
-      ++cell_counter;
+      std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell, -1);
+
+      array = Teuchos::Array<GO>(local_dof_handler.n_locally_owned_dofs());
+
+      if (rank == 0)
+        std::cout << "Checkpoint 8.3" << std::endl;
+
+      unsigned int cell_counter = 0;
+      for (auto &cell : local_dof_handler.active_cell_iterators())
+        {
+          cell->get_dof_indices(local_dof_indices);
+
+          for (unsigned int i = 0; i < dofs_per_cell; ++i)
+            array[local_dof_indices[i]] = dof_index_list[cell_counter][i];
+
+          ++cell_counter;
+        }
     }
+
+  MPI_Barrier(communicator);
+  if (rank == 0)
+    std::cout << "Checkpoint 8.4" << std::endl;
 
   overlapping_map = Teuchos::rcp(new LA::XpetraTypes::TpetraMapType<MemorySpace>(
     global_size,
@@ -533,6 +562,10 @@ OptimizedFROSchPreconditioner<dim, Number, MemorySpace>::create_overlapping_map(
     0,
     Utilities::Trilinos::internal::make_rcp<Teuchos::MpiComm<int>>(
       communicator)));
+
+  MPI_Barrier(communicator);
+  if (rank == 0)
+    std::cout << "Checkpoint 8.5" << std::endl;
 
   // One Level Operator
   optimized_schwarz->initialize(

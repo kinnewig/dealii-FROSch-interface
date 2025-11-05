@@ -103,9 +103,6 @@ namespace StepMaxwell
 
   private:
     void
-    make_grid();
-
-    void
     make_nanoparticle();
 
     void
@@ -125,6 +122,9 @@ namespace StepMaxwell
 
     double
     compute_point_value (Point<dim> p, const unsigned int component) const;
+
+    double 
+    compute_l2_norm_sphere() const;
 
     // --------------------------------------------------------
     // additional functions
@@ -223,70 +223,6 @@ namespace StepMaxwell
 
   template <int dim>
   void
-  MaxwellProblem<dim>::make_grid()
-  {
-    TimerOutput::Scope t(computing_timer, "make grid");
-
-    // left lower corner of the rectangle
-    const Point<dim> left_edge =
-      (dim == 2) ? Point<dim>(0.0, 0.0) : Point<dim>(0.0, 0.0, 0.0);
-
-    // right upper corner of the rectangle
-    const Point<dim> right_edge =
-      (dim == 2) ? Point<dim>(1.0, 3.0) : Point<dim>(1.0, 3.0, 1.0);
-
-    // create the rectangle
-    std::vector<unsigned int> repetitions = (dim == 2) ? std::vector<unsigned int>{1,3} : std::vector<unsigned int>{1, 3, 1};
-    GridGenerator::subdivided_hyper_rectangle(triangulation, repetitions, left_edge, right_edge, true);
-
-    // refine the grid
-    const unsigned int n_refinements =
-      prm.get_integer("Mesh and Geometry", "Number of refinements");
-
-    triangulation.refine_global(n_refinements);
-
-    for (auto &cell : triangulation.active_cell_iterators())
-      {
-        cell->set_material_id(0);
-
-        for (unsigned int face = 0; face < GeometryInfo<dim>::faces_per_cell;
-             ++face)
-          if (cell->face(face)->at_boundary())
-            cell->face(face)->set_boundary_id(0);
-      }
-
-    for (auto &cell : triangulation.active_cell_iterators())
-      {
-        Point<3> center(0.5, 0.5, 0.5);
-        double distance_from_center = 0.0;
-        std::vector<unsigned int> axis = {0, 2};
-        for (unsigned int i = 0; i < dim - 1; ++i)
-          distance_from_center += std::pow(cell->center()[axis[i]] - center[axis[i]], 2.0);
-        distance_from_center = std::sqrt(distance_from_center);
-
-        double radius = 0.2;
-        if (distance_from_center < radius)
-          cell->set_material_id(1);
-
-        for (unsigned int face = 0; face < GeometryInfo<dim>::faces_per_cell;
-             ++face)
-          {
-            if (!cell->face(face)->at_boundary())
-              continue;
-
-            if (cell->face(face)->center()[1] < 1e-8)
-              cell->face(face)->set_boundary_id(1);
-          }
-      }
-
-    std::string name = "Grid.vtk";
-    std::ofstream output_file(name);
-    GridOut().write_vtk(triangulation, output_file);
-  }
-
-
-  template <int dim>
-  void
   MaxwellProblem<dim>::make_nanoparticle()
   {
     TimerOutput::Scope t(computing_timer, "make grid");
@@ -342,6 +278,7 @@ namespace StepMaxwell
         {
           MPI_Comm_rank(mpi_communicator, &rank);
           this_rank_is_empty = true;
+          std::cout << "Rank " << rank << " is empty!" << std::endl;
         }
 
       // Communicate and extract the ranks without any cells
@@ -376,35 +313,32 @@ namespace StepMaxwell
         locally_relevant_solution.reinit(locally_owned_dofs,
                        locally_relevant_dofs,
                         mpi_communicator_workarround);
-    	system_rhs.reinit(locally_owned_dofs,
-    	                  locally_relevant_dofs,
-    	                  mpi_communicator_workarround);
-    	                  true);
+    	  system_rhs.reinit(locally_owned_dofs,
+    	                    locally_relevant_dofs,
+    	                    mpi_communicator_workarround,
+    	                    true);
       }
 
     constraints.clear();
     constraints.reinit(locally_owned_dofs, locally_relevant_dofs);
     DoFTools::make_hanging_node_constraints(dof_handler, constraints);
 
-    // deal.II has a build in function for constructing curl conforming boundary 
-    // functions. However, to gain more control over the RHS values, we use 
-    // the function assemble_rhs() here.
-    //
-    // FE_Nedelec boundary condition.
+    // // deal.II has a build in function for constructing curl conforming boundary 
+    // // functions. However, to gain more control over the RHS values, we use 
+    // // the function assemble_rhs() here.
+    // // FE_Nedelec boundary condition.
     // VectorTools::project_boundary_values_curl_conforming_l2(
     //  dof_handler,
     //  0 /* vector component*/,
-    //  //DirichletBoundaryValues<dim>(),
-    //  Functions::ZeroFunction<dim>(),
+    //  DirichletBoundaryValues<dim>(),
+    //  //Functions::ZeroFunction<dim>(),
     //  1 /* boundary id*/,
     //  constraints);
-
-    //// FE_Nedelec boundary condition.
     // VectorTools::project_boundary_values_curl_conforming_l2(
     //   dof_handler,
     //   dim /* vector component*/,
-    //   Functions::ZeroFunction<dim>(),
-    //   //DirichletBoundaryValues<dim>(),
+    //   //Functions::ZeroFunction<dim>(),
+    //   DirichletBoundaryValues<dim>(),
     //   1 /* boundary id*/,
     //   constraints);
 
@@ -451,7 +385,7 @@ namespace StepMaxwell
   void
   MaxwellProblem<dim>::assemble_system()
   {
-    TimerOutput::Scope t(computing_timer, "assembly");
+    //TimerOutput::Scope t(computing_timer, "assembly");
 
     system_matrix = 0;
     system_rhs    = 0;
@@ -697,7 +631,7 @@ namespace StepMaxwell
   void
   MaxwellProblem<dim>::assemble_system_rhs()
   {
-    TimerOutput::Scope t(computing_timer, "assembly rhs");
+    //TimerOutput::Scope t(computing_timer, "assembly rhs");
 
     // choose the quadrature formulas
     QGauss<dim>     quadrature_formula(fe.degree + 2);
@@ -809,7 +743,7 @@ namespace StepMaxwell
   void
   MaxwellProblem<dim>::setup_local_system()
   {
-    TimerOutput::Scope t(computing_timer, "local setup system");
+    //TimerOutput::Scope t(computing_timer, "local setup system");
 
     local_dof_handler.distribute_dofs(fe);
 
@@ -831,19 +765,16 @@ namespace StepMaxwell
     DoFTools::make_hanging_node_constraints(local_dof_handler,
                                             local_constraints);
 
-    // deal.II has a build in function for constructing curl conforming boundary 
-    // functions. However, to gain more control over the RHS values, we use 
-    // the function assemble_rhs() here.
-    //
-    // FE_Nedelec boundary condition.
+    // // deal.II has a build in function for constructing curl conforming boundary 
+    // // functions. However, to gain more control over the RHS values, we use 
+    // // the function assemble_rhs() here.
+    // // FE_Nedelec boundary condition.
     // VectorTools::project_boundary_values_curl_conforming_l2(
     //  local_dof_handler,
     //  0 /* vector component*/,
     //  DirichletBoundaryValues<dim>(),
     //  1 /* boundary id*/,
     //  local_constraints);
-
-    //// FE_Nedelec boundary condition.
     // VectorTools::project_boundary_values_curl_conforming_l2(
     //   local_dof_handler,
     //   dim /* vector component*/,
@@ -880,7 +811,7 @@ namespace StepMaxwell
   void
   MaxwellProblem<dim>::assemble_local_system()
   {
-    TimerOutput::Scope t(computing_timer, "local assembly");
+    //TimerOutput::Scope t(computing_timer, "local assembly");
 
     local_neumann_matrix = 0;
     local_robin_matrix   = 0;
@@ -1243,11 +1174,11 @@ namespace StepMaxwell
   void
   MaxwellProblem<dim>::solve()
   {
-    TimerOutput::Scope t(computing_timer, "solve");
+    //TimerOutput::Scope t(computing_timer, "solve");
     LinearAlgebra::TpetraWrappers::Vector<double>
       completely_distributed_solution(locally_owned_dofs, mpi_communicator_workarround);
 
-    SolverControl solver_control(dof_handler.n_dofs(), 1e-12);
+    SolverControl solver_control(500, 1e-6 * system_rhs.l2_norm());
 
     SolverGMRES<LinearAlgebra::TpetraWrappers::Vector<double, MemorySpace::Host>> solver(solver_control);
 
@@ -1332,11 +1263,53 @@ namespace StepMaxwell
 
 
   template <int dim>
+  double
+  MaxwellProblem<dim>::compute_l2_norm_sphere() const
+  {
+    QGauss<dim>     quadrature_formula(fe.degree + 2);
+    const unsigned int n_q_points = quadrature_formula.size(); 
+    std::vector<Vector<double> > solution_values (n_q_points, Vector<double> (2*dim));
+
+    // set update flags
+    FEValues<dim> fe_values(fe,
+                    quadrature_formula,
+                    update_values | update_gradients |
+                    update_quadrature_points | update_JxW_values);
+
+    double l2_norm = 0.0;
+
+    for (const auto &cell : dof_handler.active_cell_iterators())
+      {
+        if (!cell->is_locally_owned())
+          continue;
+
+        if (cell->material_id() != 1)
+          continue;
+
+        fe_values.reinit(cell);
+        fe_values.get_function_values(locally_relevant_solution, solution_values);
+
+        for (unsigned int component = 0; component < dim; ++component)
+          for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
+            {
+              double norm_value = std::norm(std::complex<double>(solution_values[q_point][component], solution_values[q_point][component + dim]));
+              l2_norm += norm_value * norm_value * fe_values.JxW(q_point);
+            }
+      }
+
+    // Comuicate the drag lift value between the ranks:
+    double global_l2_norm = Utilities::MPI::sum(l2_norm, mpi_communicator_workarround);
+
+    return std::sqrt(global_l2_norm);
+  }
+
+
+
+  template <int dim>
   void
   MaxwellProblem<dim>::run()
   {
     // create the grid
-    //make_grid();
     make_nanoparticle();
 
     // compute the dual graph
@@ -1360,21 +1333,20 @@ namespace StepMaxwell
       2 /*robin_boundary*/,
       mpi_communicator);
 
-    // First we need to set up and assemble the global system
-    // setup_system();
+    if ( !this_rank_is_empty )
+      setup_local_system();
+
+    optimized_schwarz_operator.create_overlapping_map(local_dof_handler,
+                                                      dof_handler.n_dofs(),
+                                                      mpi_communicator,
+                                                      this_rank_is_empty);
+
     if ( !this_rank_is_empty )
       {
-        setup_local_system();
-
-        optimized_schwarz_operator.create_overlapping_map(local_dof_handler,
-                                                          dof_handler.n_dofs(),
-                                                          mpi_communicator_workarround);
-
         assemble_local_system();
 
         optimized_schwarz_operator.compute(local_neumann_matrix,
                                            local_robin_matrix);
-
 
         pcout << "   Number of active cells:       "
               << triangulation.n_global_active_cells() << std::endl
@@ -1384,55 +1356,56 @@ namespace StepMaxwell
         solve();
       }
 
-    { // evaluate:
-       // Point: 1,0,0
-       double real_x = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 0);
-       double real_y = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 1);
-       double real_z = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 2);
-       double complex_x = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 3);
-       double complex_y = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 4);
-       double complex_z = compute_point_value (Point<dim>(0.0, 0.0, 0.0), 5);
+      { // evaluate:
+         double real_x = compute_point_value (Point<dim>(-1.5, 0.0, 0.0), 0);
+         double real_y = compute_point_value (Point<dim>(-1.5, 0.0, 0.0), 1);
+         double real_z = compute_point_value (Point<dim>(-1.5, 0.0, 0.0), 2);
+         double complex_x = compute_point_value (Point<dim>(-1.5, 0.0, 0.0), 3);
+         double complex_y = compute_point_value (Point<dim>(-1.5, 0.0, 0.0), 4);
+         double complex_z = compute_point_value (Point<dim>(-1.5, 0.0, 0.0), 5);
 
-       pcout << "Point: 0,0,0:" << std::endl;
-       pcout << real_x << " + " << complex_x << std::endl;
-       pcout << real_y << " + " << complex_y << std::endl;
-       pcout << real_z << " + " << complex_z << std::endl;
-       pcout << std::endl;
+         pcout << "Point: -1.5,0,0:" << std::endl;
+         pcout << real_x << " + " << complex_x << std::endl;
+         pcout << real_y << " + " << complex_y << std::endl;
+         pcout << real_z << " + " << complex_z << std::endl;
+         {
+           double x = std::norm(std::complex<double>(real_x, complex_x));
+           double y = std::norm(std::complex<double>(real_y, complex_y));
+           double z = std::norm(std::complex<double>(real_z, complex_z));
+           double norm = (x * x) + (y + y) + (z + z);
+           pcout << "|P_(-150,0,0)| = " << std::sqrt(norm) << std::endl;
+         }
+         pcout << std::endl;
 
-       real_x = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 0);
-       real_y = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 1);
-       real_z = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 2);
-       complex_x = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 3);
-       complex_y = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 4);
-       complex_z = compute_point_value (Point<dim>(1.0, 0.0, 0.0), 5);
+         // Point: 1.5,0,0
+         real_x = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 0);
+         real_y = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 1);
+         real_z = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 2);
+         complex_x = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 3);
+         complex_y = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 4);
+         complex_z = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 5);
 
-       pcout << "Point: 1,0,0:" << std::endl;
-       pcout << real_x << " + " << complex_x << std::endl;
-       pcout << real_y << " + " << complex_y << std::endl;
-       pcout << real_z << " + " << complex_z << std::endl;
-       pcout << std::endl;
+         pcout << "Point: 1.5,0,0:" << std::endl;
+         pcout << real_x << " + " << complex_x << std::endl;
+         pcout << real_y << " + " << complex_y << std::endl;
+         pcout << real_z << " + " << complex_z << std::endl;
+         {
+           double x = std::norm(std::complex<double>(real_x, complex_x));
+           double y = std::norm(std::complex<double>(real_y, complex_y));
+           double z = std::norm(std::complex<double>(real_z, complex_z));
+           double norm = (x * x) + (y + y) + (z + z);
+           pcout << "|P_(150,0,0)|  = " << std::sqrt(norm) << std::endl;
+         }
+         pcout << std::endl;
+      } 
 
-       // Point: 1.5,0,0
-       real_x = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 0);
-       real_y = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 1);
-       real_z = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 2);
-       complex_x = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 3);
-       complex_y = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 4);
-       complex_z = compute_point_value (Point<dim>(1.5, 0.0, 0.0), 5);
+    if ( !this_rank_is_empty )
+      {
+        pcout << "L2_norm: " << compute_l2_norm_sphere() << std::endl;
 
-       pcout << "Point: 1.5,0,0:" << std::endl;
-       pcout << real_x << " + " << complex_x << std::endl;
-       pcout << real_y << " + " << complex_y << std::endl;
-       pcout << real_z << " + " << complex_z << std::endl;
-       pcout << std::endl;
-
-       pcout << "L2_norm: " << locally_relevant_solution.l2_norm() << std::endl;
-    }
-
-    {
-      TimerOutput::Scope t(computing_timer, "output");
-      output_results();
-    }
+        //TimerOutput::Scope t(computing_timer, "output");
+        output_results();
+      } // fi !this_rank_is_empty
 
     computing_timer.print_summary();
     computing_timer.reset();
@@ -1464,9 +1437,8 @@ main(int argc, char *argv[])
         {
           case 2:
             {
-              //MaxwellProblem<2> maxwell_problem("step-maxwell.xml", MPI_COMM_WORLD);
-              //maxwell_problem.run();
-
+              // The nano particle is only defined in the 3D case
+              Assert(false, ExcNotImplemented());
               break;
             }
           case 3:

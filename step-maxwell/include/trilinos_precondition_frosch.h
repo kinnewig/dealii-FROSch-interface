@@ -151,7 +151,8 @@ public:
   void
   create_overlapping_map(DoFHandler<dim> &local_dof_handler,
                          unsigned int     global_size,
-                         MPI_Comm         communicator);
+                         MPI_Comm         communicator,
+                         bool             is_empty);
 
   /*
    * @brief Computes the Preconditioner
