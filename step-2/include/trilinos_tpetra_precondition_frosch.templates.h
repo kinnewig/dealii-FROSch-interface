@@ -209,6 +209,286 @@ namespace LinearAlgebra
 
 
       /**
+       * Compute the map from the local vertex index to the global vertex index.
+       * @note This function is only required, when a parallel::dirstributed triangulation is used.
+       */
+      template <int dim>
+      std::map<unsigned int, types::global_vertex_index>
+      compute_local_to_global_vertex_index_map(
+        parallel::distributed::Triangulation<dim> &triangulation,
+        MPI_Comm                                   communicator)
+      {
+        // Get the unsorted local to global map:
+        std::map<unsigned int, types::global_vertex_index>
+          unsorted_local_to_global =
+            GridTools::compute_local_to_global_vertex_index_map(triangulation);
+
+        // Get the highest occuring global vertex index over all ranks
+        types::global_vertex_index max_global_vertex_index = 0;
+        for (const auto pair : unsorted_local_to_global)
+          if (pair.second > max_global_vertex_index)
+            max_global_vertex_index = pair.second;
+
+        // Communicate the maximum between the ranks:
+        max_global_vertex_index =
+          Utilities::MPI::max(max_global_vertex_index, communicator) + 1;
+
+
+        // ---------------------------------------------------------------------------
+        // Communicate between the ranks, which global index belongs to which
+        // rank:
+
+        // get information about the current mpi process:
+        unsigned int n_ranks = Utilities::MPI::n_mpi_processes(communicator);
+        unsigned int rank    = Utilities::MPI::this_mpi_process(communicator);
+
+        std::vector<std::vector<bool>> index_to_rank_map;
+        {
+          std::vector<bool> local_index_to_rank_map(max_global_vertex_index,
+                                                    false);
+
+          // go through all entries, and mark every entry that is owned
+          // by this rank
+          for (const auto pair : unsorted_local_to_global)
+            local_index_to_rank_map[pair.second] = true;
+
+          // gather all local index_to_rank_maps and
+          // combine them into one list, and boradcast that list
+          // to all other ranks
+          index_to_rank_map =
+            Utilities::MPI::all_gather(communicator, local_index_to_rank_map);
+        }
+
+        // // Debugging: print that map
+        // if (rank == 0)
+        //   for (unsigned int i = 0; i < n_ranks; ++i)
+        //     {
+        //       for (unsigned int j = 0; j < max_global_vertex_index; ++j)
+        //         std::cout << index_to_rank_map[i][j] << " ";
+        //       std::cout << std::endl;
+        //     }
+
+
+        // ---------------------------------------------------------------------------
+        // Create the map to sort the unsorted map.
+
+        // count how many locally owned entries we have
+        // (we start by the complete number of local entries, and substract
+        //  all entries that do belong to a rank with an smaller rank index)
+        types::global_vertex_index n_locally_owmed =
+          unsorted_local_to_global.size();
+        for (const auto pair : unsorted_local_to_global)
+          for (unsigned int j = 0; j < rank; ++j)
+            if (index_to_rank_map[j][pair.second])
+              {
+                --n_locally_owmed;
+                break;
+              }
+
+        // Create a list that contains all global indices that are owned by
+        // this rank:
+        std::vector<types::global_vertex_index> sorting_data(n_locally_owmed);
+        {
+          unsigned int i = 0;
+          for (const auto pair : unsorted_local_to_global)
+            {
+              // check if the global index belongs to an rank with an lower
+              // index number as well if it does, we skip the index for the
+              // moment and deal later with it.
+              bool belongs_to_other_rank = false;
+              for (unsigned int j = 0; j < rank; ++j)
+                if (index_to_rank_map[j][pair.second])
+                  {
+                    belongs_to_other_rank = true;
+                    break;
+                  }
+
+              if (!belongs_to_other_rank)
+                {
+                  sorting_data[i] = pair.second;
+                  ++i;
+                }
+            }
+        }
+
+        // Sort the list of global indices owned by this rank
+        std::sort(sorting_data.begin(), sorting_data.end());
+
+        // With the sorted list of locally owned global indices, we create the
+        // map, to sort the unsorted map. This is not as confusing as it may
+        // sound, we just  create a map, that takes the (unsorted) global index,
+        // that corresponds to the smalles local index and map it to the
+        // smallest global index owned by this rank.
+        //                           ... okay maybe it is a little bit
+        //                           confusing...
+        std::map<unsigned int, types::global_vertex_index>
+          sorting_local_to_global;
+        {
+          unsigned int i = 0;
+          for (const auto pair : unsorted_local_to_global)
+            {
+              // check if the global index belongs to an rank with an lower
+              // index number as well if it does, we skip the index for the
+              // moment and deal later with it.
+              bool belongs_to_other_rank = false;
+              for (unsigned int j = 0; j < rank; ++j)
+                if (index_to_rank_map[j][pair.second])
+                  {
+                    belongs_to_other_rank = true;
+                    break;
+                  }
+
+              if (!belongs_to_other_rank)
+                {
+                  sorting_local_to_global[pair.second] = sorting_data[i];
+                  ++i;
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------------
+        // Syncronise between ranks:
+        // TODO: this is a very simple approach that communicates way more than
+        // necessary
+
+        std::map<unsigned int, types::global_vertex_index> syncronise_map;
+        for (const auto pair : unsorted_local_to_global)
+          for (unsigned int i = rank + 1; i < n_ranks; ++i)
+            if (index_to_rank_map[i][pair.second])
+              syncronise_map[pair.second] =
+                sorting_local_to_global[pair.second];
+
+        std::vector<std::map<unsigned int, types::global_vertex_index>>
+          gathered_syncronise_map =
+            Utilities::MPI::gather(communicator, syncronise_map);
+
+        if (rank == 0)
+          {
+            for (int i = n_ranks - 1; i >= 0; --i)
+              for (const auto pair : gathered_syncronise_map[i])
+                syncronise_map[pair.first] = pair.second;
+          }
+        syncronise_map =
+          Utilities::MPI::broadcast(communicator, syncronise_map);
+
+        // Fill in the values from the other ranks
+        for (const auto pair : unsorted_local_to_global)
+          for (unsigned int i = 0; i < rank; ++i)
+            if (index_to_rank_map[i][pair.second])
+              {
+                sorting_local_to_global[pair.second] =
+                  syncronise_map[pair.second];
+                break;
+              }
+
+        // Finally we can create the sorted map
+        std::map<unsigned int, types::global_vertex_index> local_to_global;
+        for (const auto pair : unsorted_local_to_global)
+          local_to_global[pair.first] = sorting_local_to_global[pair.second];
+
+        return local_to_global;
+      }
+
+
+
+      /**
+       * Workarround:
+       * Unfortunately, the function
+       * GridTools::compute_local_to_global_vertex_index_map() has a bug that
+       * causes some indices to be missing on some ranks. This is a workaround
+       * to add missing indices. This function takes the
+       * local_to_global_vertex_index_map and a std::vector<unsigned int> with
+       * the missing indices and adds the missing local global pairs to the
+       * local_to_global map.
+       *
+       * @note This function is only required, when a parallel::dirstributed triangulation is used.
+       */
+      void
+      add_missing_global_vertex_indices(
+        std::map<unsigned int, types::global_vertex_index> &local_to_global,
+        const std::vector<unsigned int>                    &local_indices,
+        MPI_Comm                                            communicator)
+      {
+        // get information about the current mpi process:
+        unsigned int n_ranks = Utilities::MPI::n_mpi_processes(communicator);
+        unsigned int rank    = Utilities::MPI::this_mpi_process(communicator);
+
+        // send an request of the missing local indices to all other ranks:
+        std::vector<std::vector<unsigned int>> gathered_local_indices =
+          Utilities::MPI::all_gather(communicator, local_indices);
+
+        // Store the awnser
+        std::map<unsigned int, std::vector<types::global_vertex_index>> awnser;
+
+        // check if this ranks owns any of the local indices that is missing on
+        // an other rank
+        for (unsigned int i = 0; i < n_ranks; ++i)
+          {
+            if (i != rank)
+              {
+                std::vector<types::global_vertex_index> awnser_vector(
+                  gathered_local_indices[i].size());
+
+                bool found_awnser = false;
+                for (unsigned int j = 0; j < gathered_local_indices[i].size();
+                     ++j)
+                  {
+                    try
+                      {
+                        awnser_vector[j] =
+                          local_to_global.at(gathered_local_indices[i][j]);
+
+                        found_awnser = true;
+                      }
+                    catch (std::out_of_range &e)
+                      {
+                        // the local index does not exist on the current rank
+                        awnser_vector[j] = 0;
+                      }
+                  }
+
+                if (found_awnser)
+                  awnser[i] = awnser_vector;
+              }
+          }
+
+        // communicate the awnser:
+        std::map<unsigned int, std::vector<types::global_vertex_index>>
+          gathered_awnser = Utilities::MPI::some_to_some(communicator, awnser);
+
+
+        // Gather the local to global pairs, ranks with a lower index have
+        // a higher priority.
+        std::vector<types::global_vertex_index> global_indices(
+          local_indices.size());
+        std::vector<types::global_vertex_index> tmp;
+        for (unsigned int i = n_ranks - 1; i > 0; --i)
+          {
+            if (i != rank)
+              try
+                {
+                  tmp = gathered_awnser.at(i);
+                }
+              catch (std::out_of_range &e)
+                {
+                  // the local index does not exist on the current rank
+                  tmp = std::vector<types::global_vertex_index>();
+                }
+
+            if (tmp.size() == local_indices.size())
+              for (unsigned int j = 0; j < local_indices.size(); ++j)
+                if (tmp[j] != 0)
+                  global_indices[j] = tmp[j];
+          }
+
+        // add the missing entries
+        for (unsigned int j = 0; j < local_indices.size(); ++j)
+          local_to_global[local_indices[j]] = global_indices[j];
+      }
+
+
+
+      /**
        * @brief Converts the Xpetra::MultiVector node_vector into a std::vector of dealii::Point.
        *
        * This is an internally used function that is called by
@@ -560,19 +840,13 @@ namespace LinearAlgebra
     void
     PreconditionOptimizedFROSch<dim, Number, MemorySpace>::
       create_local_triangulation(
-        DoFHandler<dim>                      &dof_handler,
-        parallel::shared::Triangulation<dim> &triangulation,
-        Triangulation<dim>                   &local_triangulation,
-        const unsigned int                    interface_boundary_id,
-        MPI_Comm                              communicator)
+        DoFHandler<dim>                           &dof_handler,
+        parallel::distributed::Triangulation<dim> &triangulation,
+        Triangulation<dim>                        &local_triangulation,
+        const unsigned int                         interface_boundary_id,
+        MPI_Comm                                   communicator)
     {
-      // ------------------------------------------------------------------------------------------
-      // Get the local to global map:
-      // std::map<unsigned int, types::global_vertex_index> local_to_global =
-      //  GridTools::compute_local_to_global_vertex_index_map(triangulation);
-
-      // IndexSet locally_relevant_dofs =
-      // DoFTools::extract_locally_relevant_dofs(dof_handler);
+      // --------------------------------------------------------------------
       Teuchos::RCP<XpetraTypes::MapType<MemorySpace>> uniqueMap =
         Teuchos::rcp(new XpetraTypes::TpetraMapType<MemorySpace>(
           dof_handler.locally_owned_dofs().make_tpetra_map_rcp(communicator,
@@ -586,26 +860,49 @@ namespace LinearAlgebra
         triangulation.n_locally_owned_active_cells() *
         GeometryInfo<dim>::vertices_per_cell);
 
-      long long vertex_counter = 0; // TODO: size_type
+      // Get the local to global map:
+      std::map<unsigned int, types::global_vertex_index> local_to_global =
+        internal::compute_local_to_global_vertex_index_map(triangulation,
+                                                           communicator);
 
-      if (triangulation.n_locally_owned_active_cells() != 0)
-        for (auto &cell : triangulation.cell_iterators())
+      // BUG FIX!
+      // In some cases the local_to_global map is missing some entries.
+      {
+        // Identify the missing entries
+        std::vector<unsigned int> missing_entries;
+        for (auto &cell : dof_handler.active_cell_iterators())
           {
-            if (!cell->is_active())
-              continue;
-
             if (!cell->is_locally_owned())
               continue;
 
             // loop over all verices
             for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
-              {
-                vertex_array[vertex_counter] = cell->vertex_index(vertex_index);
-                vertex_counter++;
-              }
+              if (local_to_global[cell->vertex_index(vertex_index)] == 0 &&
+                  cell->vertex_index(vertex_index) != 0)
+                missing_entries.push_back(cell->vertex_index(vertex_index));
           }
-      FROSch::sortunique(vertex_array);
 
+        // Add the missing entries:
+        internal::add_missing_global_vertex_indices(local_to_global,
+                                                    missing_entries,
+                                                    communicator);
+      }
+
+      long long vertex_counter = 0;
+      for (auto &cell : dof_handler.active_cell_iterators())
+        {
+          if (!cell->is_locally_owned())
+            continue;
+
+          // loop over all verices
+          for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
+            {
+              vertex_array[vertex_counter] =
+                local_to_global[cell->vertex_index(vertex_index)];
+              vertex_counter++;
+            }
+        }
+      FROSch::sortunique(vertex_array);
 
       Teuchos::RCP<XpetraTypes::MapType<MemorySpace>> x_local_to_global_map =
         XpetraTypes::MapFactoryType<MemorySpace>::Build(
@@ -701,50 +998,48 @@ namespace LinearAlgebra
       std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
       GO cell_counter = 0;
+      for (auto &cell : dof_handler.active_cell_iterators())
+        {
+          if (!cell->is_locally_owned())
+            continue;
 
-      if (triangulation.n_locally_owned_active_cells() != 0)
-        for (auto &cell : dof_handler.active_cell_iterators())
-          {
-            if (!cell->is_locally_owned())
-              continue;
-
-            // Fill node_vector:
-            for (unsigned int i = 0; i < dim; ++i)
-              for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
-                nodes_vector_data[i][x_local_to_global_map->getLocalElement(
-                  cell->vertex_index(vertex_index))] =
-                  cell->vertex(vertex_index)[i];
-
-            // Fill cell_data_vector:
+          // Fill node_vector:
+          for (unsigned int i = 0; i < dim; ++i)
             for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
-              cell_vector_data[vertex_index][cell_counter] =
-                cell->vertex_index(vertex_index);
+              nodes_vector_data[i][x_local_to_global_map->getLocalElement(
+                local_to_global[cell->vertex_index(vertex_index)])] =
+                cell->vertex(vertex_index)[i];
 
-            // Fill auxillary_vector:
-            if (cell->at_boundary())
-              for (unsigned int face = 0; face < faces_per_cell; face++)
-                if (cell->face(face)->at_boundary())
-                  {
-                    auxillary_vector_data[face][cell_counter] =
-                      cell->face(face)->boundary_id();
-                    auxillary_vector_data[faces_per_cell + face][cell_counter] =
-                      cell->face(face)->manifold_id();
-                  }
+          // Fill cell_data_vector:
+          for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
+            cell_vector_data[vertex_index][cell_counter] =
+              local_to_global[cell->vertex_index(vertex_index)];
 
-            cell->get_dof_indices(local_dof_indices);
-            for (unsigned int i = 0; i < dofs_per_cell; ++i)
-              auxillary_vector_data[(2 * faces_per_cell) + i][cell_counter] =
-                local_dof_indices[i];
+          // Fill auxillary_vector:
+          if (cell->at_boundary())
+            for (unsigned int face = 0; face < faces_per_cell; face++)
+              if (cell->face(face)->at_boundary())
+                {
+                  auxillary_vector_data[face][cell_counter] =
+                    cell->face(face)->boundary_id();
+                  auxillary_vector_data[faces_per_cell + face][cell_counter] =
+                    cell->face(face)->manifold_id();
+                }
 
-            // Add information about the system to the auxiallary list:
-            auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 0]
-                                 [cell_counter] = cell->material_id();
-            auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 1]
-                                 [cell_counter] =
-                                   cell->global_active_cell_index();
+          cell->get_dof_indices(local_dof_indices);
+          for (unsigned int i = 0; i < dofs_per_cell; ++i)
+            auxillary_vector_data[(2 * faces_per_cell) + i][cell_counter] =
+              local_dof_indices[i];
 
-            cell_counter++;
-          }
+          // Add information about the system to the auxiallary list:
+          auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 0]
+                               [cell_counter] = cell->material_id();
+          auxillary_vector_data[(2 * faces_per_cell) + dofs_per_cell + 1]
+                               [cell_counter] =
+                                 cell->global_active_cell_index();
+
+          cell_counter++;
+        }
 
 
       // ------------------------------------------------------------------------------------------
@@ -787,37 +1082,34 @@ namespace LinearAlgebra
         internal::extract_point_list<dim, MemorySpace>(nodes_vector);
 
 
-      if (triangulation.n_locally_owned_active_cells() != 0)
-        local_triangulation.create_triangulation(vertices,
-                                                 cell_data,
-                                                 SubCellData());
+      local_triangulation.create_triangulation(vertices,
+                                               cell_data,
+                                               SubCellData());
 
       // reapply boundaries
       cell_counter = 0;
-      if (triangulation.n_locally_owned_active_cells() != 0)
-        for (auto &cell : local_triangulation.cell_iterators())
-          {
-            cell->set_material_id(
-              sub_cell_data[cell_counter]
-                           [(2 * faces_per_cell) + dofs_per_cell]);
+      for (auto &cell : local_triangulation.cell_iterators())
+        {
+          cell->set_material_id(
+            sub_cell_data[cell_counter][(2 * faces_per_cell) + dofs_per_cell]);
 
-            if (cell->at_boundary())
-              for (unsigned int face = 0; face < faces_per_cell; face++)
-                if (cell->face(face)->at_boundary())
-                  {
-                    cell->face(face)->set_manifold_id(
-                      sub_cell_data[cell_counter][faces_per_cell + face]);
+          if (cell->at_boundary())
+            for (unsigned int face = 0; face < faces_per_cell; face++)
+              if (cell->face(face)->at_boundary())
+                {
+                  cell->face(face)->set_manifold_id(
+                    sub_cell_data[cell_counter][faces_per_cell + face]);
 
-                    if (sub_cell_data[cell_counter][face] == -1)
-                      // this indicates, we are on an internal edge, therefore
-                      // we need to assign the interface_boundary_id
-                      cell->face(face)->set_boundary_id(interface_boundary_id);
-                    else
-                      cell->face(face)->set_boundary_id(
-                        sub_cell_data[cell_counter][face]);
-                  }
-            cell_counter++;
-          }
+                  if (sub_cell_data[cell_counter][face] == -1)
+                    // this indicates, we are on an internal edge, therefore
+                    // we need to assign the interface_boundary_id
+                    cell->face(face)->set_boundary_id(interface_boundary_id);
+                  else
+                    cell->face(face)->set_boundary_id(
+                      sub_cell_data[cell_counter][face]);
+                }
+          cell_counter++;
+        }
 
       // just for debugging
       // int rank;
@@ -935,6 +1227,18 @@ namespace LinearAlgebra
       dual_graph.reset();
       optimized_schwarz.reset();
       overlapping_map.reset();
+    }
+
+
+
+    template <int dim, typename Number, typename MemorySpace>
+    unsigned int
+    PreconditionOptimizedFROSch<dim, Number, MemorySpace>::get_dof(
+      const unsigned int cell,
+      const unsigned int i) const
+    {
+      return (unsigned int)overlapping_map->getLocalElement(
+        dof_index_list[cell][i]);
     }
 
 #  endif // DEAL_II_TRILINOS_WITH_SHYLU_DDFROSCH

@@ -2,8 +2,8 @@
  *
  * Copyright (C) 2024 - 2025 Sebastian Kinnewig
  *
- * The code is licensed under the GNU Lesser General Public License as 
- * published by the Free Software Foundation in version 2.1 
+ * The code is licensed under the GNU Lesser General Public License as
+ * published by the Free Software Foundation in version 2.1
  * The full text of the license can be found in the file LICENSE.md
  *
  * ---------------------------------------------------------------------
@@ -52,11 +52,11 @@
 #include <deal.II/lac/affine_constraints.h>
 #include <deal.II/lac/dynamic_sparsity_pattern.h>
 #include <deal.II/lac/full_matrix.h>
-#include <deal.II/lac/sparsity_tools.h>
 #include <deal.II/lac/solver_gmres.h>
+#include <deal.II/lac/sparsity_tools.h>
+#include <deal.II/lac/trilinos_tpetra_precondition.h>
 #include <deal.II/lac/trilinos_tpetra_sparse_matrix.h>
 #include <deal.II/lac/trilinos_tpetra_vector.h>
-#include <deal.II/lac/trilinos_tpetra_precondition.h>
 #include <deal.II/lac/vector.h>
 
 #include <deal.II/numerics/data_out.h>
@@ -64,8 +64,9 @@
 #include <deal.II/numerics/vector_tools.h>
 
 // Optimized Schwarz Preconditioner
-#include <trilinos_precondition_frosch.h>
 #include <parameter_reader.h>
+#include <trilinos_tpetra_precondition.h>
+#include <trilinos_tpetra_precondition_frosch.templates.h>
 
 #include <iostream>
 #include <string>
@@ -105,7 +106,7 @@ namespace Step2
     setup_local_system();
 
     // === Member ===
-    // Parameter Reader 
+    // Parameter Reader
     ParameterReader prm;
 
     // MPI communicator
@@ -114,13 +115,15 @@ namespace Step2
     // Locall problem
     AffineConstraints<double> local_constraints;
 
-    Triangulation<dim>                                               local_triangulation;
-    DoFHandler<dim>                                                  local_dof_handler;
-    LinearAlgebra::TpetraWrappers::SparseMatrix<double>              local_neumann_matrix;
-    LinearAlgebra::TpetraWrappers::SparseMatrix<double>              local_robin_matrix;
-    LinearAlgebra::TpetraWrappers::Vector<double, MemorySpace::Host> local_system_rhs;
+    Triangulation<dim>                                  local_triangulation;
+    DoFHandler<dim>                                     local_dof_handler;
+    LinearAlgebra::TpetraWrappers::SparseMatrix<double> local_neumann_matrix;
+    LinearAlgebra::TpetraWrappers::SparseMatrix<double> local_robin_matrix;
+    LinearAlgebra::TpetraWrappers::Vector<double, MemorySpace::Host>
+      local_system_rhs;
 
-    OptimizedFROSchPreconditioner<dim, double> optimized_schwarz_operator;
+    LinearAlgebra::TpetraWrappers::PreconditionOptimizedFROSch<dim, double>
+      optimized_schwarz_operator;
 
     // --------------------------------------------------------
 
@@ -146,13 +149,13 @@ namespace Step2
 
 
   template <int dim>
-  LaplaceProblem<dim>::LaplaceProblem(
-      std::string xml_file, 
-      MPI_Comm mpi_comm)
+  LaplaceProblem<dim>::LaplaceProblem(std::string xml_file, MPI_Comm mpi_comm)
     : prm(xml_file)
     , mpi_communicator(mpi_comm)
     , local_dof_handler(local_triangulation)
-    , optimized_schwarz_operator(xml_file)
+    , optimized_schwarz_operator(
+        LinearAlgebra::TpetraWrappers::
+          PreconditionOptimizedFROSch<dim, double>::OneLevel)
     , triangulation(mpi_communicator,
                     typename Triangulation<dim>::MeshSmoothing(
                       Triangulation<dim>::smoothing_on_refinement |
@@ -406,8 +409,7 @@ namespace Step2
                     for (const unsigned int j : fe_face_values.dof_indices())
                       {
                         cell_robin_matrix(i, j) +=
-                          alpha *
-                          fe_face_values.shape_value(i, q_face_point) *
+                          alpha * fe_face_values.shape_value(i, q_face_point) *
                           fe_face_values.shape_value(j, q_face_point) *
                           fe_face_values.JxW(q_face_point);
                       }
@@ -425,8 +427,11 @@ namespace Step2
                                      cell_robin_matrix(i, j));
             }
 
-        local_constraints.distribute_local_to_global(
-          cell_neumann_matrix, cell_rhs, local_dof_indices, local_neumann_matrix, local_system_rhs);
+        local_constraints.distribute_local_to_global(cell_neumann_matrix,
+                                                     cell_rhs,
+                                                     local_dof_indices,
+                                                     local_neumann_matrix,
+                                                     local_system_rhs);
 
         ++cell_counter;
       }
@@ -446,15 +451,14 @@ namespace Step2
 
     SolverControl solver_control(dof_handler.n_dofs(), 1e-12);
 
-    SolverGMRES<LinearAlgebra::TpetraWrappers::Vector<double, MemorySpace::Host>> solver(solver_control);
-
-    LinearAlgebra::TpetraWrappers::PreconditionGeometricFROSch<double> preconditioner("one_level");
-    preconditioner.initialize(optimized_schwarz_operator.get_precondioner());
+    SolverGMRES<
+      LinearAlgebra::TpetraWrappers::Vector<double, MemorySpace::Host>>
+      solver(solver_control);
 
     solver.solve(system_matrix,
                  completely_distributed_solution,
                  system_rhs,
-                 preconditioner);
+                 optimized_schwarz_operator);
 
     pcout << "Solved in " << solver_control.last_step() << std::endl;
 
@@ -494,7 +498,7 @@ namespace Step2
     // create the grid
     GridGenerator::hyper_cube(triangulation);
 
-    const unsigned int refinements = 
+    const unsigned int refinements =
       prm.get_integer("Mesh and Geometry", "Number of refinements");
     triangulation.refine_global(refinements);
 
@@ -504,24 +508,25 @@ namespace Step2
     setup_system();
     assemble_system();
 
+    optimized_schwarz_operator.set_parameter_list(*prm.get_parameter_list());
     optimized_schwarz_operator.initialize(system_matrix);
 
     // create the overlapping partitioning
-    optimized_schwarz_operator.create_local_triangulation(
-      dof_handler,
-      triangulation,
-      local_triangulation,
-      1 /*robin_boundary*/,
-      mpi_communicator);
+    optimized_schwarz_operator.create_local_triangulation(dof_handler,
+                                                          triangulation,
+                                                          local_triangulation,
+                                                          1 /*robin_boundary*/,
+                                                          mpi_communicator);
 
     // First we need to set up and assemble the global system
     // setup_system();
     setup_local_system();
 
-    optimized_schwarz_operator.create_overlapping_map(local_dof_handler, dof_handler.n_dofs(), mpi_communicator);
+    optimized_schwarz_operator.create_overlapping_map(local_dof_handler,
+                                                      dof_handler.n_dofs(),
+                                                      mpi_communicator);
 
-    double alpha =
-      prm.get_double("Preconditioner List", "Alpha");
+    double alpha = prm.get_double("Preconditioner List", "Alpha");
     assemble_local_system(alpha);
 
     optimized_schwarz_operator.compute(local_neumann_matrix,
@@ -588,7 +593,6 @@ main(int argc, char *argv[])
               break;
             }
         }
-
     }
   catch (std::exception &exc)
     {

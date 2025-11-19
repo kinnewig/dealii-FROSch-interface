@@ -349,11 +349,11 @@ namespace LinearAlgebra
        */
       void
       create_local_triangulation(
-        DoFHandler<dim>                      &dof_handler,
-        parallel::shared::Triangulation<dim> &triangulation,
-        Triangulation<dim>                   &local_triangulation,
-        const unsigned int                    interface_boundary_id,
-        MPI_Comm                              communicator);
+        DoFHandler<dim>                           &dof_handler,
+        parallel::distributed::Triangulation<dim> &triangulation,
+        Triangulation<dim>                        &local_triangulation,
+        const unsigned int                         interface_boundary_id,
+        MPI_Comm                                   communicator);
 
       /**
        * This function creates the overlapping map, i.e., which global_dof index
