@@ -16,7 +16,7 @@ Example of an one-level ORAS preconditioner with Robin interface conditions appl
 Here we demonstrate how to apply the one-level ORAS preconditioner, provided by the deal.II-FROSch interface to the time-harmonic Maxwell's equations.
 
 Important aspects of this work are part of deal.II, which you can find here: https://github.com/kinnewig/dealii/tree/FROSch-preconditioner.
-Other important aspects of this work are part of FROSch, which is part of Trilinos. Therefore, you can find it here: https://github.com/kinnewig/Trilinos/tree/OptimizedSchwarz
+Other important aspects of this work are part of FROSch, which is part of Trilinos. Therefore, you can find it here: https://github.com/kinnewig/Trilinos/tree/OptimizedSchwarz-16.2.0
 
 ## Citation
 Please use the *Cite this repository* button in the *About* section of this repository.
@@ -37,7 +37,7 @@ cd dcs2
 ```
 2. Step: Run the install script:
 ```
-./dcs.sh  -b </path/to/build> -p </path/to/install> --cmake-flags "-D TRILINOS_CUSTOM_URL=https://github.com/kinnewig/Trilinos.git -D TRILINOS_CUSTOM_TAG=OptimizedSchwarz -D DEALII_CUSTOM_URL=https://github.com/kinnewig/dealii.git -D DEALII_CUSTOM_TAG=FROSch-preconditioner"
+./dcs.sh  -b </path/to/build> -p </path/to/install> --cmake-flags "-D TRILINOS_CUSTOM_URL=https://github.com/kinnewig/Trilinos.git -D TRILINOS_CUSTOM_TAG=OptimizedSchwarz-16.2.0 -D DEALII_CUSTOM_URL=https://github.com/kinnewig/dealii.git -D DEALII_CUSTOM_TAG=FROSch-preconditioner"
 ```
 
 Remember to replace `</path/to/build>` with the path where you would like to store the temporary files created while installing deal.II (the folder can be deleted once you successfully installed deal.II).
@@ -53,7 +53,7 @@ If you have any problems feel free to open an issue on: https://github.com/kinne
 ```
 git clone https://github.com/kinnewig/Trilinos.git
 cd Trilinos
-git checkout OptimizedSchwarz
+git checkout OptimizedSchwarz-16.2.0
 ```
 
 3. Configure and install Trilinos, as usual.
